@@ -382,40 +382,8 @@ public class GameFrame extends JFrame {
         });
     }
 
-    private void showPositionEvaluation() {
-        GameState currentState = getStateCopy();
 
-        // Run evaluation in background to avoid blocking UI
-        aiExecutor.submit(() -> {
-            try {
-                int eval = Minimax.evaluate(currentState, 0);
 
-                SwingUtilities.invokeLater(() -> {
-                    String message = String.format(
-                            "Position Evaluation: %+d\n\n" +
-                                    "Positive = Good for Red\n" +
-                                    "Negative = Good for Blue\n\n" +
-                                    "Current turn: %s\n" +
-                                    "AI uses ULTIMATE STRATEGY (PVS + Quiescence) for superior tactical analysis",
-                            eval,
-                            currentState.redToMove ? "Red" : "Blue"
-                    );
-
-                    JOptionPane.showMessageDialog(this, message,
-                            "Position Analysis", JOptionPane.INFORMATION_MESSAGE);
-                });
-
-            } catch (Exception e) {
-                SwingUtilities.invokeLater(() -> {
-                    JOptionPane.showMessageDialog(this,
-                            "Error evaluating position: " + e.getMessage(),
-                            "Evaluation Error", JOptionPane.ERROR_MESSAGE);
-                });
-            }
-        });
-    }
-
-    // *** NEW METHOD: Strategy comparison ***
     private void showStrategyComparison() {
         if (aiThinking) {
             updateStatus("Please wait for AI to finish thinking...");
@@ -427,26 +395,28 @@ public class GameFrame extends JFrame {
         // Run comparison in background
         aiExecutor.submit(() -> {
             try {
-                SwingUtilities.invokeLater(() -> updateStatus("Comparing AI strategies... (this may take a moment)"));
+                SwingUtilities.invokeLater(() -> updateStatus("Comparing Enhanced AI strategies..."));
 
-                System.out.println("\n=== STRATEGY COMPARISON ===");
+                System.out.println("\n=== ENHANCED STRATEGY COMPARISON ===");
                 currentState.printBoard();
 
-                // Test different strategies
                 Minimax.SearchStrategy[] strategies = {
                         Minimax.SearchStrategy.ALPHA_BETA,
                         Minimax.SearchStrategy.ALPHA_BETA_Q,
                         Minimax.SearchStrategy.PVS,
-                        Minimax.SearchStrategy.PVS_Q  // Your ultimate strategy
+                        Minimax.SearchStrategy.PVS_Q
                 };
 
-                StringBuilder results = new StringBuilder("Strategy Comparison Results:\n\n");
+                StringBuilder results = new StringBuilder("Enhanced Strategy Comparison:\n\n");
 
                 for (Minimax.SearchStrategy strategy : strategies) {
+                    // Reset all statistics
+                    Minimax.resetPruningStats();
+                    Minimax.counter = 0;
+                    QuiescenceSearch.resetQuiescenceStats();
+
                     long startTime = System.currentTimeMillis();
-
                     Move move = TimedMinimax.findBestMoveWithStrategy(currentState, 4, 3000, strategy);
-
                     long endTime = System.currentTimeMillis();
                     long searchTime = endTime - startTime;
 
@@ -455,28 +425,68 @@ public class GameFrame extends JFrame {
                     resultState.applyMove(move);
                     int evaluation = Minimax.evaluate(resultState, 0);
 
-                    results.append(String.format("%s:\n", strategy));
-                    results.append(String.format("  Move: %s\n", move));
-                    results.append(String.format("  Evaluation: %+d\n", evaluation));
-                    results.append(String.format("  Time: %dms\n", searchTime));
-                    results.append(String.format("  Nodes: %d\n\n", Minimax.counter));
+                    // Build detailed results
+                    results.append(String.format("=== %s ===\n", strategy));
+                    results.append(String.format("Move: %s\n", move));
+                    results.append(String.format("Evaluation: %+d\n", evaluation));
+                    results.append(String.format("Time: %dms\n", searchTime));
+                    results.append(String.format("Nodes: %d\n", Minimax.counter));
 
-                    System.out.printf("%s: Move=%s, Eval=%+d, Time=%dms, Nodes=%d\n",
-                            strategy, move, evaluation, searchTime, Minimax.counter);
+                    // Add pruning statistics
+                    if (Minimax.reverseFutilityCutoffs > 0) {
+                        results.append(String.format("RFP cutoffs: %d (%.1f%%)\n",
+                                Minimax.reverseFutilityCutoffs,
+                                100.0 * Minimax.reverseFutilityCutoffs / Minimax.counter));
+                    }
+                    if (Minimax.nullMoveCutoffs > 0) {
+                        results.append(String.format("Null move: %d (%.1f%%)\n",
+                                Minimax.nullMoveCutoffs,
+                                100.0 * Minimax.nullMoveCutoffs / Minimax.counter));
+                    }
+                    if (Minimax.futilityCutoffs > 0) {
+                        results.append(String.format("Futility: %d (%.1f%%)\n",
+                                Minimax.futilityCutoffs,
+                                100.0 * Minimax.futilityCutoffs / Minimax.counter));
+                    }
+                    if (Minimax.checkExtensions > 0) {
+                        results.append(String.format("Extensions: %d\n", Minimax.checkExtensions));
+                    }
+
+                    // Add quiescence statistics for Q strategies
+                    if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q ||
+                            strategy == Minimax.SearchStrategy.PVS_Q) {
+                        if (QuiescenceSearch.qNodes > 0) {
+                            results.append(String.format("Q-nodes: %d\n", QuiescenceSearch.qNodes));
+                            double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
+                            results.append(String.format("Stand-pat: %.1f%%\n", standPatRate));
+                        }
+                    }
+
+                    long totalPruning = Minimax.reverseFutilityCutoffs + Minimax.nullMoveCutoffs + Minimax.futilityCutoffs;
+                    if (totalPruning > 0) {
+                        double pruningEfficiency = 100.0 * totalPruning / (Minimax.counter + totalPruning);
+                        results.append(String.format("Total pruning: %.1f%%\n", pruningEfficiency));
+                    }
+
+                    results.append("\n");
+
+                    System.out.printf("%s: Move=%s, Eval=%+d, Time=%dms, Nodes=%d, Pruning=%.1f%%\n",
+                            strategy, move, evaluation, searchTime, Minimax.counter,
+                            totalPruning > 0 ? 100.0 * totalPruning / (Minimax.counter + totalPruning) : 0.0);
                 }
 
                 SwingUtilities.invokeLater(() -> {
-                    updateStatus("Strategy comparison completed!");
+                    updateStatus("Enhanced strategy comparison completed!");
 
                     JTextArea textArea = new JTextArea(results.toString());
                     textArea.setEditable(false);
-                    textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+                    textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
 
                     JScrollPane scrollPane = new JScrollPane(textArea);
-                    scrollPane.setPreferredSize(new Dimension(500, 400));
+                    scrollPane.setPreferredSize(new Dimension(600, 500));
 
                     JOptionPane.showMessageDialog(this, scrollPane,
-                            "AI Strategy Comparison", JOptionPane.INFORMATION_MESSAGE);
+                            "Enhanced AI Strategy Comparison", JOptionPane.INFORMATION_MESSAGE);
                 });
 
             } catch (Exception e) {
@@ -487,6 +497,73 @@ public class GameFrame extends JFrame {
                             "Comparison Error", JOptionPane.ERROR_MESSAGE);
                 });
                 e.printStackTrace();
+            }
+        });
+    }
+
+    /**
+     * Erweiterte Position Evaluation mit Pruning Stats
+     */
+    private void showPositionEvaluation() {
+        GameState currentState = getStateCopy();
+
+        aiExecutor.submit(() -> {
+            try {
+                // Reset statistics
+                Minimax.resetPruningStats();
+                Minimax.counter = 0;
+                QuiescenceSearch.resetQuiescenceStats();
+
+                long startTime = System.currentTimeMillis();
+                int eval = Minimax.evaluate(currentState, 0);
+                Move bestMove = Minimax.findBestMoveWithStrategy(currentState, 5, Minimax.SearchStrategy.PVS_Q);
+                long endTime = System.currentTimeMillis();
+
+                SwingUtilities.invokeLater(() -> {
+                    String message = String.format(
+                            "=== ENHANCED POSITION ANALYSIS ===\n\n" +
+                                    "Static Evaluation: %+d\n" +
+                                    "Best Move: %s\n" +
+                                    "Search Time: %dms\n" +
+                                    "Nodes Searched: %d\n\n" +
+                                    "=== PRUNING EFFICIENCY ===\n" +
+                                    "RFP Cutoffs: %d (%.1f%%)\n" +
+                                    "Null Move: %d (%.1f%%)\n" +
+                                    "Futility: %d (%.1f%%)\n" +
+                                    "Check Extensions: %d\n\n" +
+                                    "=== QUIESCENCE SEARCH ===\n" +
+                                    "Q-nodes: %d\n" +
+                                    "Stand-pat Rate: %.1f%%\n\n" +
+                                    "Turn: %s\n" +
+                                    "AI Strategy: ULTIMATE (PVS + Quiescence + All Pruning)\n\n" +
+                                    "Positive = Good for Red\n" +
+                                    "Negative = Good for Blue",
+                            eval,
+                            bestMove,
+                            endTime - startTime,
+                            Minimax.counter,
+                            Minimax.reverseFutilityCutoffs,
+                            Minimax.counter > 0 ? 100.0 * Minimax.reverseFutilityCutoffs / Minimax.counter : 0,
+                            Minimax.nullMoveCutoffs,
+                            Minimax.counter > 0 ? 100.0 * Minimax.nullMoveCutoffs / Minimax.counter : 0,
+                            Minimax.futilityCutoffs,
+                            Minimax.counter > 0 ? 100.0 * Minimax.futilityCutoffs / Minimax.counter : 0,
+                            Minimax.checkExtensions,
+                            QuiescenceSearch.qNodes,
+                            QuiescenceSearch.qNodes > 0 ? 100.0 * QuiescenceSearch.standPatCutoffs / QuiescenceSearch.qNodes : 0,
+                            currentState.redToMove ? "Red" : "Blue"
+                    );
+
+                    JOptionPane.showMessageDialog(this, message,
+                            "Enhanced Position Analysis", JOptionPane.INFORMATION_MESSAGE);
+                });
+
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(this,
+                            "Error evaluating position: " + e.getMessage(),
+                            "Evaluation Error", JOptionPane.ERROR_MESSAGE);
+                });
             }
         });
     }

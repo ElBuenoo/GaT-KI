@@ -122,6 +122,7 @@ public class GameClient {
             // Use the ultimate AI strategy with precise time control
             long searchStartTime = System.currentTimeMillis();
 
+
             Move bestMove = TimedMinimax.findBestMoveWithStrategy(state, 99, timeForMove, Minimax.SearchStrategy.PVS_Q);
 
             long searchTime = System.currentTimeMillis() - searchStartTime;
