@@ -5,24 +5,44 @@ import GaT.Objects.TTEntry;
 
 import java.util.List;
 
+/**
+ * TOURNAMENT-ENHANCED TimedMinimax with intelligent strategy selection
+ *
+ * Tournament Features:
+ * - Intelligent strategy selection based on time and complexity
+ * - Enhanced time management with adaptive thresholds
+ * - Tournament-optimized defaults and parameters
+ * - Comprehensive statistics and monitoring
+ * - Auto-scaling search depth and pruning
+ */
 public class TimedMinimax {
 
     private static long timeLimitMillis;
     private static long startTime;
 
+    // === TOURNAMENT-OPTIMIZED DEFAULTS ===
+    private static final Minimax.SearchStrategy DEFAULT_TOURNAMENT_STRATEGY = Minimax.SearchStrategy.PVS_Q;
+    private static final int MIN_DEPTH_FOR_TOURNAMENT = 4;  // Minimum depth für Tournament features
+    private static final long TOURNAMENT_TIME_THRESHOLD = 1000; // Min Zeit für Tournament strategy
+
     /**
-     * Original method - uses regular minimax
+     * ULTIMATE TOURNAMENT AI - Best possible search with all enhancements
      */
-    public static Move findBestMoveWithTime(GameState state, int maxDepth, long timeMillis) {
+    public static Move findBestMoveUltimate(GameState state, int maxDepth, long timeMillis) {
         TimedMinimax.timeLimitMillis = timeMillis;
         TimedMinimax.startTime = System.currentTimeMillis();
 
+        // Enhanced setup for ultimate performance
+        PVSSearch.setTimeoutChecker(() -> timedOut());
         Minimax.resetKillerMoves();
+        QuiescenceSearch.setRemainingTime(timeMillis);
+        QuiescenceSearch.resetQuiescenceStats();
+        Minimax.setRemainingTime(timeMillis); // CRITICAL: Sync time with Minimax
 
         Move bestMove = null;
         Move lastCompleteMove = null;
 
-        System.out.println("=== Starting Iterative Deepening ===");
+        System.out.println("=== ULTIMATE TOURNAMENT AI (Enhanced PVS + Quiescence + All Optimizations) ===");
 
         for (int depth = 1; depth <= maxDepth; depth++) {
             if (timedOut()) {
@@ -33,42 +53,142 @@ public class TimedMinimax {
             long depthStartTime = System.currentTimeMillis();
 
             try {
-                Move candidate = searchDepthWithBetterTT(state, depth);
+                // ENHANCED: Use tournament strategy with intelligent selection
+                Minimax.SearchStrategy strategy = selectOptimalStrategy(state, depth, timeMillis);
+
+                Move candidate = Minimax.findBestMoveWithStrategy(state, depth, strategy);
 
                 if (candidate != null) {
                     lastCompleteMove = candidate;
                     bestMove = candidate;
 
                     long depthTime = System.currentTimeMillis() - depthStartTime;
-                    System.out.println("✓ Depth " + depth + " completed in " + depthTime + "ms. Best: " + candidate);
+                    System.out.println("✓ ULTIMATE Depth " + depth + " (" + strategy + ") completed in " +
+                            depthTime + "ms. Best: " + candidate);
 
+                    // Enhanced winning move detection
                     GameState testState = state.copy();
                     testState.applyMove(candidate);
                     if (Minimax.isGameOver(testState)) {
-                        System.out.println("🎯 Winning move found at depth " + depth);
+                        System.out.println("🎯 ULTIMATE AI found winning move at depth " + depth);
                         break;
                     }
                 }
 
-            } catch (TimeoutException e) {
-                System.out.println("⏱ Timeout at depth " + depth);
+            } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
+                    System.out.println("⏱ ULTIMATE Timeout at depth " + depth);
+                } else {
+                    System.out.println("❌ ULTIMATE Error at depth " + depth + ": " + e.getMessage());
+                }
                 break;
             }
 
+            // Enhanced time management
             long elapsed = System.currentTimeMillis() - startTime;
             long remaining = timeMillis - elapsed;
-            if (remaining < timeMillis * 0.2) {
-                System.out.println("⚡ Stopping early to save time. Remaining: " + remaining + "ms");
+
+            // More aggressive time allocation for tournament
+            double timeUsageRate = (double) elapsed / timeMillis;
+            if (timeUsageRate > 0.75) { // Stop if used 75% of time
+                System.out.println("⚡ ULTIMATE AI stopping early: used " +
+                        String.format("%.1f%%", timeUsageRate * 100) + " of time");
                 break;
             }
         }
 
-        System.out.println("=== Search completed. Best move: " + bestMove + " ===");
+        // Enhanced final statistics
+        printUltimateStatistics();
+
+        System.out.println("=== ULTIMATE TOURNAMENT AI completed. Best move: " + bestMove + " ===");
         return bestMove != null ? bestMove : lastCompleteMove;
     }
 
     /**
-     * NEW: Enhanced method with quiescence search
+     * TOURNAMENT-OPTIMIZED strategy selection based on time and complexity
+     */
+    private static Minimax.SearchStrategy selectOptimalStrategy(GameState state, int depth, long timeMillis) {
+        // Time-based strategy selection for optimal performance
+
+        if (timeMillis < TOURNAMENT_TIME_THRESHOLD) {
+            // Very low time - use fastest strategy
+            return Minimax.SearchStrategy.ALPHA_BETA;
+        }
+
+        if (depth < MIN_DEPTH_FOR_TOURNAMENT) {
+            // Shallow search - simple strategy sufficient
+            return Minimax.SearchStrategy.ALPHA_BETA_Q;
+        }
+
+        // Check position complexity
+        int complexity = evaluatePositionComplexity(state);
+
+        if (complexity > 20) {
+            // Complex tactical position - use full power
+            return Minimax.SearchStrategy.PVS_Q;
+        } else if (complexity > 10) {
+            // Moderate complexity - PVS without quiescence
+            return Minimax.SearchStrategy.PVS;
+        } else {
+            // Simple position - alpha-beta with quiescence sufficient
+            return Minimax.SearchStrategy.ALPHA_BETA_Q;
+        }
+    }
+
+    /**
+     * ENHANCED position complexity evaluation for strategy selection
+     */
+    private static int evaluatePositionComplexity(GameState state) {
+        int complexity = 0;
+
+        // Base complexity from move count
+        List<Move> moves = MoveGenerator.generateAllMoves(state);
+        complexity += moves.size() / 3; // Normalize
+
+        // Material complexity
+        int totalMaterial = 0;
+        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+            totalMaterial += state.redStackHeights[i] + state.blueStackHeights[i];
+        }
+
+        if (totalMaterial > 12) complexity += 5;      // Opening complexity
+        if (totalMaterial <= 6) complexity += 10;     // Endgame complexity
+
+        // Tactical complexity
+        List<Move> tacticalMoves = QuiescenceSearch.generateTacticalMoves(state);
+        complexity += tacticalMoves.size() * 2; // Heavy weight for tactics
+
+        // Guard danger complexity
+        if (Minimax.isGuardInDangerImproved(state, true) ||
+                Minimax.isGuardInDangerImproved(state, false)) {
+            complexity += 15; // High complexity for guard danger
+        }
+
+        // Position evaluation spread (indicator of tactical richness)
+        int eval = Minimax.evaluate(state, 0);
+        if (Math.abs(eval) > 500) {
+            complexity += 8; // Unbalanced positions are complex
+        }
+
+        return complexity;
+    }
+
+    /**
+     * ENHANCED main timed search - automatically selects best approach
+     */
+    public static Move findBestMoveWithTime(GameState state, int maxDepth, long timeMillis) {
+        // Enhanced version that automatically selects best approach
+        if (timeMillis > 5000) {
+            // Enough time for ultimate search
+            return findBestMoveUltimate(state, maxDepth, timeMillis);
+        } else {
+            // Time pressure - use enhanced but faster approach
+            return findBestMoveWithTimeAndQuiescence(state, maxDepth, timeMillis);
+        }
+    }
+
+    /**
+     * Enhanced timed search with quiescence
      */
     public static Move findBestMoveWithTimeAndQuiescence(GameState state, int maxDepth, long timeMillis) {
         TimedMinimax.timeLimitMillis = timeMillis;
@@ -76,11 +196,13 @@ public class TimedMinimax {
 
         Minimax.resetKillerMoves();
         QuiescenceSearch.resetQuiescenceStats();
+        QuiescenceSearch.setRemainingTime(timeMillis);
+        Minimax.setRemainingTime(timeMillis);
 
         Move bestMove = null;
         Move lastCompleteMove = null;
 
-        System.out.println("=== Starting Iterative Deepening with Quiescence ===");
+        System.out.println("=== TOURNAMENT Iterative Deepening with Quiescence ===");
 
         for (int depth = 1; depth <= maxDepth; depth++) {
             if (timedOut()) {
@@ -91,7 +213,6 @@ public class TimedMinimax {
             long depthStartTime = System.currentTimeMillis();
 
             try {
-                // Use quiescence search
                 Move candidate = searchDepthWithQuiescence(state, depth);
 
                 if (candidate != null) {
@@ -99,84 +220,159 @@ public class TimedMinimax {
                     bestMove = candidate;
 
                     long depthTime = System.currentTimeMillis() - depthStartTime;
-                    System.out.println("✓ Depth " + depth + " completed in " + depthTime + "ms. Best: " + candidate);
+                    System.out.println("✓ TOURNAMENT Depth " + depth + " completed in " + depthTime + "ms. Best: " + candidate);
 
                     GameState testState = state.copy();
                     testState.applyMove(candidate);
                     if (Minimax.isGameOver(testState)) {
-                        System.out.println("🎯 Winning move found at depth " + depth);
+                        System.out.println("🎯 TOURNAMENT winning move found at depth " + depth);
                         break;
                     }
                 }
 
             } catch (TimeoutException e) {
-                System.out.println("⏱ Timeout at depth " + depth);
+                System.out.println("⏱ TOURNAMENT Timeout at depth " + depth);
                 break;
             }
 
             long elapsed = System.currentTimeMillis() - startTime;
             long remaining = timeMillis - elapsed;
             if (remaining < timeMillis * 0.2) {
-                System.out.println("⚡ Stopping early to save time. Remaining: " + remaining + "ms");
+                System.out.println("⚡ TOURNAMENT stopping early to save time. Remaining: " + remaining + "ms");
                 break;
             }
         }
 
         // Print quiescence statistics
         if (QuiescenceSearch.qNodes > 0) {
-            System.out.println("Q-nodes used: " + QuiescenceSearch.qNodes);
+            System.out.println("TOURNAMENT Q-nodes used: " + QuiescenceSearch.qNodes);
             if (QuiescenceSearch.qNodes > 0) {
                 double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
-                System.out.println("Stand-pat rate: " + String.format("%.1f%%", standPatRate));
+                System.out.println("TOURNAMENT Stand-pat rate: " + String.format("%.1f%%", standPatRate));
             }
         }
 
-        System.out.println("=== Search with Quiescence completed. Best move: " + bestMove + " ===");
+        System.out.println("=== TOURNAMENT Search with Quiescence completed. Best move: " + bestMove + " ===");
         return bestMove != null ? bestMove : lastCompleteMove;
     }
 
     /**
-     * Original search method - uses regular minimax
+     * ENHANCED strategy-based search with tournament optimizations
      */
-    private static Move searchDepthWithBetterTT(GameState state, int depth) throws TimeoutException {
-        List<Move> moves = MoveGenerator.generateAllMoves(state);
+    public static Move findBestMoveWithStrategy(GameState state, int maxDepth, long timeMillis,
+                                                Minimax.SearchStrategy strategy) {
+        TimedMinimax.timeLimitMillis = timeMillis;
+        TimedMinimax.startTime = System.currentTimeMillis();
 
-        long hash = state.hash();
-        TTEntry entry = Minimax.getTranspositionEntry(hash);
+        // Enhanced setup based on strategy
+        if (strategy == Minimax.SearchStrategy.PVS || strategy == Minimax.SearchStrategy.PVS_Q) {
+            PVSSearch.setTimeoutChecker(() -> timedOut());
+        }
 
-        orderMovesWithAdvancedHeuristics(moves, state, depth, entry);
+        Minimax.resetKillerMoves();
+        Minimax.setRemainingTime(timeMillis); // CRITICAL sync
+
+        if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q || strategy == Minimax.SearchStrategy.PVS_Q) {
+            QuiescenceSearch.setRemainingTime(timeMillis);
+            QuiescenceSearch.resetQuiescenceStats();
+        }
 
         Move bestMove = null;
-        boolean isRed = state.redToMove;
-        int bestScore = isRed ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        Move lastCompleteMove = null;
 
-        for (Move move : moves) {
-            if (timedOut()) throw new TimeoutException();
+        System.out.println("=== TOURNAMENT " + strategy + " with Enhanced Iterative Deepening ===");
 
-            GameState copy = state.copy();
-            copy.applyMove(move);
+        for (int depth = 1; depth <= maxDepth; depth++) {
+            if (timedOut()) {
+                System.out.println("⏱ Time limit reached before depth " + depth);
+                break;
+            }
+
+            long depthStartTime = System.currentTimeMillis();
 
             try {
-                int score = Minimax.minimaxWithTimeout(copy, depth - 1, Integer.MIN_VALUE,
-                        Integer.MAX_VALUE, !isRed, () -> timedOut());
+                // Use the enhanced strategy interface from Minimax
+                Move candidate = Minimax.findBestMoveWithStrategy(state, depth, strategy);
 
-                if ((isRed && score > bestScore) || (!isRed && score < bestScore) || bestMove == null) {
-                    bestScore = score;
-                    bestMove = move;
+                if (candidate != null) {
+                    lastCompleteMove = candidate;
+                    bestMove = candidate;
+
+                    long depthTime = System.currentTimeMillis() - depthStartTime;
+                    System.out.println("✓ TOURNAMENT Depth " + depth + " completed in " +
+                            depthTime + "ms. Best: " + candidate);
+
+                    // Enhanced winning move detection
+                    GameState testState = state.copy();
+                    testState.applyMove(candidate);
+                    if (Minimax.isGameOver(testState)) {
+                        System.out.println("🎯 TOURNAMENT winning move found at depth " + depth);
+                        break;
+                    }
                 }
-            } catch (RuntimeException e) {
-                if (e.getMessage().equals("Timeout")) {
-                    throw new TimeoutException();
+
+            } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
+                    System.out.println("⏱ TOURNAMENT Timeout at depth " + depth);
+                } else {
+                    System.out.println("❌ TOURNAMENT Error at depth " + depth + ": " + e.getMessage());
                 }
-                throw e;
+                break;
+            }
+
+            // Enhanced time management with adaptive thresholds
+            long elapsed = System.currentTimeMillis() - startTime;
+            long remaining = timeMillis - elapsed;
+
+            // Adaptive stopping based on strategy
+            double stopThreshold = getStopThreshold(strategy);
+            if (elapsed > timeMillis * stopThreshold) {
+                System.out.println("⚡ TOURNAMENT stopping early: used " +
+                        String.format("%.1f%%", 100.0 * elapsed / timeMillis) + " of time");
+                break;
             }
         }
 
-        return bestMove;
+        // Print strategy-specific statistics
+        printStrategyStatistics(strategy);
+
+        System.out.println("=== TOURNAMENT " + strategy + " completed. Best move: " + bestMove + " ===");
+        return bestMove != null ? bestMove : lastCompleteMove;
     }
 
     /**
-     * NEW: Search method with quiescence
+     * NEW: Ultimate tournament method - automatically selects best approach
+     */
+    public static Move findBestMoveTournament(GameState state, int maxDepth, long timeMillis) {
+        // Ultimate tournament method - automatically selects best approach
+
+        // Time-based strategy selection
+        if (timeMillis > 8000) {
+            // Plenty of time - use full ultimate search
+            return findBestMoveUltimate(state, maxDepth, timeMillis);
+        } else if (timeMillis > 3000) {
+            // Moderate time - use PVS with quiescence
+            return findBestMoveWithStrategy(state, maxDepth, timeMillis, Minimax.SearchStrategy.PVS_Q);
+        } else if (timeMillis > 1000) {
+            // Time pressure - use alpha-beta with quiescence
+            return findBestMoveWithStrategy(state, maxDepth, timeMillis, Minimax.SearchStrategy.ALPHA_BETA_Q);
+        } else {
+            // Extreme time pressure - use fastest strategy
+            return findBestMoveWithStrategy(state, maxDepth, timeMillis, Minimax.SearchStrategy.ALPHA_BETA);
+        }
+    }
+
+    /**
+     * Enhanced PVS search (for compatibility)
+     */
+    public static Move findBestMoveWithPVS(GameState state, int maxDepth, long timeMillis) {
+        return findBestMoveWithStrategy(state, maxDepth, timeMillis, Minimax.SearchStrategy.PVS);
+    }
+
+    // === ENHANCED HELPER METHODS ===
+
+    /**
+     * Search depth with quiescence
      */
     private static Move searchDepthWithQuiescence(GameState state, int depth) throws TimeoutException {
         List<Move> moves = MoveGenerator.generateAllMoves(state);
@@ -217,7 +413,7 @@ public class TimedMinimax {
     }
 
     /**
-     * NEW: Minimax with quiescence and timeout support
+     * Minimax with quiescence and timeout support
      */
     private static int minimaxWithQuiescenceAndTimeout(GameState state, int depth, int alpha, int beta,
                                                        boolean maximizingPlayer) {
@@ -250,7 +446,7 @@ public class TimedMinimax {
 
         // Regular alpha-beta search
         List<Move> moves = MoveGenerator.generateAllMoves(state);
-        Minimax.orderMovesAdvanced(moves, state, depth, entry);
+        Minimax.orderMovesTournament(moves, state, depth, entry);
 
         Move bestMove = null;
         int originalAlpha = alpha;
@@ -312,267 +508,103 @@ public class TimedMinimax {
         }
     }
 
-
-
-
-
-    // ADD these methods to your existing TimedMinimax.java class
-
     /**
-     * NEW: Ultimate AI method - PVS + Quiescence + Iterative Deepening
-     * This is what you should use for your contest AI!
+     * Enhanced timeout check with safety margin
      */
-    public static Move findBestMoveUltimate(GameState state, int maxDepth, long timeMillis) {
-        TimedMinimax.timeLimitMillis = timeMillis;
-        TimedMinimax.startTime = System.currentTimeMillis();
-
-        // Setup timeout for PVS
-        PVSSearch.setTimeoutChecker(() -> timedOut());
-
-        Minimax.resetKillerMoves();
-        QuiescenceSearch.resetQuiescenceStats();
-
-        Move bestMove = null;
-        Move lastCompleteMove = null;
-
-        System.out.println("=== Starting Ultimate AI (PVS + Quiescence + Iterative Deepening) ===");
-
-        for (int depth = 1; depth <= maxDepth; depth++) {
-            if (timedOut()) {
-                System.out.println("⏱ Time limit reached before depth " + depth);
-                break;
-            }
-
-            long depthStartTime = System.currentTimeMillis();
-
-            try {
-                // Use Ultimate search: PVS + YOUR Quiescence
-                Move candidate = Minimax.findBestMoveUltimate(state, depth);
-
-                if (candidate != null) {
-                    lastCompleteMove = candidate;
-                    bestMove = candidate;
-
-                    long depthTime = System.currentTimeMillis() - depthStartTime;
-                    System.out.println("✓ Depth " + depth + " completed in " + depthTime + "ms. Best: " + candidate);
-
-                    // Check for winning move
-                    GameState testState = state.copy();
-                    testState.applyMove(candidate);
-                    if (Minimax.isGameOver(testState)) {
-                        System.out.println("🎯 Winning move found at depth " + depth);
-                        break;
-                    }
-                }
-
-            } catch (Exception e) {
-                if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
-                    System.out.println("⏱ Timeout at depth " + depth);
-                } else {
-                    System.out.println("❌ Error at depth " + depth + ": " + e.getMessage());
-                }
-                break;
-            }
-
-            // Time management
-            long elapsed = System.currentTimeMillis() - startTime;
-            long remaining = timeMillis - elapsed;
-            if (remaining < timeMillis * 0.2) {
-                System.out.println("⚡ Stopping early to save time. Remaining: " + remaining + "ms");
-                break;
-            }
-        }
-
-        // Print final stats
-        if (QuiescenceSearch.qNodes > 0) {
-            System.out.println("Final Q-nodes: " + QuiescenceSearch.qNodes);
-            System.out.println("Final Stand-pat rate: " + (100.0 * QuiescenceSearch.standPatCutoffs / QuiescenceSearch.qNodes) + "%");
-        }
-
-        System.out.println("=== Ultimate AI Search completed. Best move: " + bestMove + " ===");
-        return bestMove != null ? bestMove : lastCompleteMove;
-    }
-
-    /**
-     * NEW: PVS only (without Quiescence) for comparison
-     */
-    public static Move findBestMoveWithPVS(GameState state, int maxDepth, long timeMillis) {
-        TimedMinimax.timeLimitMillis = timeMillis;
-        TimedMinimax.startTime = System.currentTimeMillis();
-
-        PVSSearch.setTimeoutChecker(() -> timedOut());
-        Minimax.resetKillerMoves();
-
-        Move bestMove = null;
-        Move lastCompleteMove = null;
-
-        System.out.println("=== Starting PVS Search (without Quiescence) ===");
-
-        for (int depth = 1; depth <= maxDepth; depth++) {
-            if (timedOut()) {
-                System.out.println("⏱ Time limit reached before depth " + depth);
-                break;
-            }
-
-            try {
-                Move candidate = Minimax.findBestMoveWithPVS(state, depth);
-
-                if (candidate != null) {
-                    lastCompleteMove = candidate;
-                    bestMove = candidate;
-
-                    long depthTime = System.currentTimeMillis() - startTime;
-                    System.out.println("✓ Depth " + depth + " completed. Best: " + candidate);
-
-                    GameState testState = state.copy();
-                    testState.applyMove(candidate);
-                    if (Minimax.isGameOver(testState)) {
-                        System.out.println("🎯 Winning move found");
-                        break;
-                    }
-                }
-
-            } catch (Exception e) {
-                if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
-                    System.out.println("⏱ Timeout at depth " + depth);
-                }
-                break;
-            }
-
-            long elapsed = System.currentTimeMillis() - startTime;
-            long remaining = timeMillis - elapsed;
-            if (remaining < timeMillis * 0.2) {
-                break;
-            }
-        }
-
-        return bestMove != null ? bestMove : lastCompleteMove;
-    }
-
-    /**
-     * ENHANCED: Strategy-based search method
-     */
-    public static Move findBestMoveWithStrategy(GameState state, int maxDepth, long timeMillis,
-                                                Minimax.SearchStrategy strategy) {
-        TimedMinimax.timeLimitMillis = timeMillis;
-        TimedMinimax.startTime = System.currentTimeMillis();
-
-        // Setup appropriate components based on strategy
-        if (strategy == Minimax.SearchStrategy.PVS || strategy == Minimax.SearchStrategy.PVS_Q) {
-            PVSSearch.setTimeoutChecker(() -> timedOut());
-        }
-
-        Minimax.resetKillerMoves();
-
-        if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q || strategy == Minimax.SearchStrategy.PVS_Q) {
-            QuiescenceSearch.setRemainingTime(timeMillis); // Sync time
-            QuiescenceSearch.resetQuiescenceStats();
-        }
-
-        Move bestMove = null;
-        Move lastCompleteMove = null;
-
-        System.out.println("=== Starting " + strategy + " with Iterative Deepening ===");
-
-        for (int depth = 1; depth <= maxDepth; depth++) {
-            if (timedOut()) {
-                System.out.println("⏱ Time limit reached before depth " + depth);
-                break;
-            }
-
-            long depthStartTime = System.currentTimeMillis();
-
-            try {
-                // Use the unified strategy interface from Minimax
-                Move candidate = Minimax.findBestMoveWithStrategy(state, depth, strategy);
-
-                if (candidate != null) {
-                    lastCompleteMove = candidate;
-                    bestMove = candidate;
-
-                    long depthTime = System.currentTimeMillis() - depthStartTime;
-                    System.out.println("✓ Depth " + depth + " completed in " + depthTime + "ms. Best: " + candidate);
-
-                    // Check for immediate win
-                    GameState testState = state.copy();
-                    testState.applyMove(candidate);
-                    if (Minimax.isGameOver(testState)) {
-                        System.out.println("🎯 Winning move found at depth " + depth);
-                        break;
-                    }
-                }
-
-            } catch (Exception e) {
-                if (e.getMessage() != null && e.getMessage().contains("Timeout")) {
-                    System.out.println("⏱ Timeout at depth " + depth);
-                } else {
-                    System.out.println("❌ Error at depth " + depth + ": " + e.getMessage());
-                }
-                break;
-            }
-
-            // Time management: stop early if running low on time
-            long elapsed = System.currentTimeMillis() - startTime;
-            long remaining = timeMillis - elapsed;
-            if (remaining < timeMillis * 0.2) {
-                System.out.println("⚡ Stopping early to save time. Remaining: " + remaining + "ms");
-                break;
-            }
-        }
-
-        // Print final statistics for quiescence strategies
-        if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q || strategy == Minimax.SearchStrategy.PVS_Q) {
-            if (QuiescenceSearch.qNodes > 0) {
-                System.out.println("Q-nodes: " + QuiescenceSearch.qNodes);
-                double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
-                System.out.println("Stand-pat rate: " + String.format("%.1f%%", standPatRate));
-            }
-        }
-
-        System.out.println("=== Search completed. Best move: " + bestMove + " ===");
-        return bestMove != null ? bestMove : lastCompleteMove;
-    }
-
-    // Helper method (add if not already present)
     private static boolean timedOut() {
-        return System.currentTimeMillis() - startTime >= timeLimitMillis;
+        // Enhanced timeout check with safety margin
+        long currentTime = System.currentTimeMillis();
+        long elapsed = currentTime - startTime;
+
+        // Add small safety margin (50ms) to prevent time forfeit
+        return elapsed >= (timeLimitMillis - 50);
     }
 
     /**
-     * Helper method to print final statistics
+     * Get strategy-specific stopping threshold
      */
-    private static void printFinalStats(Minimax.SearchStrategy strategy) {
-        if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q || strategy == Minimax.SearchStrategy.PVS_Q) {
-            if (QuiescenceSearch.qNodes > 0) {
-                System.out.println("Q-nodes: " + QuiescenceSearch.qNodes);
-                double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
-                System.out.println("Stand-pat rate: " + String.format("%.1f%%", standPatRate));
+    private static double getStopThreshold(Minimax.SearchStrategy strategy) {
+        // Different stopping thresholds for different strategies
+        switch (strategy) {
+            case PVS_Q:
+                return 0.80; // Most thorough strategy - use more time
+            case PVS:
+                return 0.75;
+            case ALPHA_BETA_Q:
+                return 0.70;
+            case ALPHA_BETA:
+                return 0.65; // Fastest strategy - stop earlier
+            default:
+                return 0.70;
+        }
+    }
+
+    /**
+     * Enhanced statistics for ultimate search
+     */
+    private static void printUltimateStatistics() {
+        // Print comprehensive tournament statistics
+        if (QuiescenceSearch.qNodes > 0) {
+            System.out.println("🔍 ULTIMATE Q-Search Statistics:");
+            System.out.println("  Q-nodes: " + QuiescenceSearch.qNodes);
+
+            double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
+            System.out.println("  Stand-pat rate: " + String.format("%.1f%%", standPatRate));
+
+            if (QuiescenceSearch.deltaPruningCutoffs > 0) {
+                double deltaPruningRate = (100.0 * QuiescenceSearch.deltaPruningCutoffs) / QuiescenceSearch.qNodes;
+                System.out.println("  Delta pruning: " + String.format("%.1f%%", deltaPruningRate));
+            }
+        }
+
+        if (Minimax.counter > 0) {
+            System.out.println("🚀 ULTIMATE Pruning Efficiency:");
+            long totalPruning = Minimax.reverseFutilityCutoffs + Minimax.nullMoveCutoffs + Minimax.futilityCutoffs;
+            if (totalPruning > 0) {
+                double pruningRate = 100.0 * totalPruning / (Minimax.counter + totalPruning);
+                System.out.println("  Total pruning: " + String.format("%.1f%%", pruningRate));
             }
         }
     }
 
-
-
-
     /**
-     * Helper method to store in transposition table
+     * Strategy-specific statistics
      */
-    private static void storeInTranspositionTable(long hash, int score, int depth, int flag, Move bestMove) {
-        // This would need to access Minimax's transposition table
-        // For now, we'll skip storing to avoid complex access issues
-        // The search will still work, just without some TT benefits in the quiescence version
+    private static void printStrategyStatistics(Minimax.SearchStrategy strategy) {
+        System.out.println("📊 TOURNAMENT " + strategy + " Statistics:");
+
+        if (strategy == Minimax.SearchStrategy.ALPHA_BETA_Q || strategy == Minimax.SearchStrategy.PVS_Q) {
+            if (QuiescenceSearch.qNodes > 0) {
+                System.out.println("  Q-nodes: " + QuiescenceSearch.qNodes);
+                double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
+                System.out.println("  Stand-pat rate: " + String.format("%.1f%%", standPatRate));
+            }
+        }
+
+        if (Minimax.counter > 0) {
+            System.out.println("  Search nodes: " + Minimax.counter);
+            long totalPruning = Minimax.reverseFutilityCutoffs + Minimax.nullMoveCutoffs + Minimax.futilityCutoffs;
+            if (totalPruning > 0) {
+                double pruningRate = 100.0 * totalPruning / (Minimax.counter + totalPruning);
+                System.out.println("  Pruning efficiency: " + String.format("%.1f%%", pruningRate));
+            }
+        }
     }
 
     /**
      * Move ordering with advanced heuristics
      */
     private static void orderMovesWithAdvancedHeuristics(List<Move> moves, GameState state, int depth, TTEntry entry) {
-        Minimax.orderMovesAdvanced(moves, state, depth, entry);
+        Minimax.orderMovesTournament(moves, state, depth, entry);
     }
 
-    /*private static boolean timedOut() {
-        return System.currentTimeMillis() - startTime >= timeLimitMillis;
-    }*/
+    /**
+     * Helper method to store in transposition table
+     */
+    private static void storeInTranspositionTable(long hash, int score, int depth, int flag, Move bestMove) {
+        TTEntry entry = new TTEntry(score, depth, flag, bestMove);
+        Minimax.storeTranspositionEntry(hash, entry);
+    }
 
     private static class TimeoutException extends Exception {
         private static final long serialVersionUID = 1L;

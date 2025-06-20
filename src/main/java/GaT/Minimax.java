@@ -16,8 +16,8 @@ public class Minimax {
     public static final int BLUE_CASTLE_INDEX = getIndex(0, 3); // D1
     public static int counter = 0;
 
-    // ENHANCED: Proper TranspositionTable statt HashMap
-    private static final TranspositionTable transpositionTable = new TranspositionTable(2_000_000);
+    // ENHANCED: Larger TranspositionTable for tournament play
+    private static final TranspositionTable transpositionTable = new TranspositionTable(8_000_000); // 4x größer
 
     // Strategic squares
     final static int[] centralSquares = {
@@ -35,29 +35,54 @@ public class Minimax {
             GameState.getIndex(6, 2), GameState.getIndex(6, 4)   // C7, E7
     };
 
-    // === EVALUATION CONSTANTS ===
+    // === TOURNAMENT-OPTIMIZED EVALUATION CONSTANTS ===
     private static final int GUARD_CAPTURE_SCORE = 1500;
     private static final int CASTLE_REACH_SCORE = 2500;
-    private static final int GUARD_DANGER_PENALTY = 600;
-    private static final int MATERIAL_VALUE = 130;
-    private static final int MOBILITY_BONUS = 15;
-    private static final int CENTRAL_CONTROL_BONUS = 25;
-    private static final int GUARD_ADVANCEMENT_BONUS = 40;
+    private static final int GUARD_DANGER_PENALTY = 900;        // Von 600 → 900
+    private static final int MATERIAL_BASE = 115;               // Von 130 → 115
+    private static final int PIECE_SQUARE_BONUS = 25;           // NEU
+    private static final int MOBILITY_FACTOR = 18;              // NEU
+    private static final int THREAT_BONUS = 180;                // NEU
+    private static final int COORDINATION_BONUS = 35;           // NEU
+    private static final int CONTROL_BONUS = 40;                // NEU
+    private static final int ADVANCEMENT_BONUS = 120;           // Von 40 → 120
 
-    // === SEARCH ENHANCEMENTS ===
-    private static Move[][] killerMoves = new Move[20][2];
+    // === PIECE-SQUARE TABLES for Tournament-Level Positional Play ===
+    private static final int[][] GUARD_PST = {
+            {-40, -30, -20, -10, -20, -30, -40},  // Rank 1 (Blue's side)
+            {-30, -15,   5,  15,   5, -15, -30},  // Rank 2
+            {-20,   5,  20,  30,  20,   5, -20},  // Rank 3
+            {-10,  15,  30,  40,  30,  15, -10},  // Rank 4 (Center)
+            {-20,   5,  20,  30,  20,   5, -20},  // Rank 5
+            {-30, -15,   5,  15,   5, -15, -30},  // Rank 6
+            {-40, -30, -20, -10, -20, -30, -40}   // Rank 7 (Red's side)
+    };
+
+    private static final int[][] TOWER_PST = {
+            { 0,  10, 20, 30, 20, 10,  0},
+            {10,  20, 30, 40, 30, 20, 10},
+            {20,  30, 40, 50, 40, 30, 20},
+            {30,  40, 50, 60, 50, 40, 30},  // Central ranks more valuable
+            {20,  30, 40, 50, 40, 30, 20},
+            {10,  20, 30, 40, 30, 20, 10},
+            { 0,  10, 20, 30, 20, 10,  0}
+    };
+
+    // === ENHANCED SEARCH ENHANCEMENTS ===
+    private static Move[][] killerMoves = new Move[25][2];      // Erhöht von 20 → 25
     private static int killerAge = 0;
-    private static Move[] pvLine = new Move[20];
+    private static Move[] pvLine = new Move[25];                // Erhöht von 20 → 25
 
     // ENHANCED: History Heuristic für bessere Move Ordering
     private static int[][] historyTable = new int[49][49];
     private static final int HISTORY_MAX = 10000;
 
-    // === PRUNING STATISTICS ===
+    // === ENHANCED PRUNING STATISTICS ===
     public static long reverseFutilityCutoffs = 0;
     public static long nullMoveCutoffs = 0;
     public static long futilityCutoffs = 0;
     public static long checkExtensions = 0;
+    public static long lmrReductions = 0;                       // NEU
 
     // === TIME MANAGEMENT ===
     private static long remainingTimeMs = 180000;
@@ -85,38 +110,39 @@ public class Minimax {
         nullMoveCutoffs = 0;
         futilityCutoffs = 0;
         checkExtensions = 0;
+        lmrReductions = 0;
     }
 
     /**
-     * MAIN SEARCH INTERFACE mit Aspiration Windows
+     * TOURNAMENT-ENHANCED SEARCH INTERFACE
      */
     public static Move findBestMoveWithStrategy(GameState state, int depth, SearchStrategy strategy) {
         resetPruningStats();
 
-        // ENHANCED: Aspiration Windows für tiefe Suchen
-        if (depth >= 5 && remainingTimeMs > 20000) {
+        // ENHANCED: More aggressive aspiration windows
+        if (depth >= 4 && remainingTimeMs > 15000) { // Früher starten
             return findBestMoveWithAspiration(state, depth, strategy);
         }
         return findBestMoveStandard(state, depth, strategy);
     }
 
     /**
-     * ENHANCED: Aspiration Window Search für bessere Performance
+     * ENHANCED: More aggressive Aspiration Window Search
      */
     private static Move findBestMoveWithAspiration(GameState state, int depth, SearchStrategy strategy) {
         List<Move> moves = MoveGenerator.generateAllMoves(state);
         TTEntry previousEntry = getTranspositionEntry(state.hash());
 
         // ENHANCED: Bessere Move Ordering
-        orderMovesUltimate(moves, state, depth, previousEntry);
+        orderMovesTournament(moves, state, depth, previousEntry);
 
         Move bestMove = null;
         boolean isRed = state.redToMove;
         int bestScore = isRed ? Integer.MIN_VALUE : Integer.MAX_VALUE;
 
-        // Aspiration Window Setup
+        // More aggressive aspiration window setup
         int previousScore = 0;
-        if (previousEntry != null && previousEntry.depth >= depth - 2) {
+        if (previousEntry != null && previousEntry.depth >= depth - 3) { // Erweitert von -2 → -3
             previousScore = previousEntry.score;
             // TT Move first
             if (previousEntry.bestMove != null && moves.contains(previousEntry.bestMove)) {
@@ -125,11 +151,11 @@ public class Minimax {
             }
         }
 
-        int delta = 50;
+        int delta = 40; // Reduced from 50 → 40 for tighter windows
         int alpha = previousScore - delta;
         int beta = previousScore + delta;
 
-        System.out.println("=== " + strategy + " with Aspiration Windows (Depth " + depth + ") ===");
+        System.out.println("=== TOURNAMENT " + strategy + " with Aspiration Windows (Depth " + depth + ") ===");
 
         counter = 0;
         if (strategy == SearchStrategy.ALPHA_BETA_Q || strategy == SearchStrategy.PVS_Q) {
@@ -140,7 +166,7 @@ public class Minimax {
         boolean searchComplete = false;
         int failCount = 0;
 
-        while (!searchComplete && failCount < 3) {
+        while (!searchComplete && failCount < 4) { // Erhöht von 3 → 4
             try {
                 bestMove = null;
                 bestScore = isRed ? Integer.MIN_VALUE : Integer.MAX_VALUE;
@@ -172,11 +198,11 @@ public class Minimax {
 
             } catch (AspirationFailException e) {
                 failCount++;
-                delta *= 4;
+                delta *= 3; // Reduced from 4 → 3 for more controlled expansion
                 alpha = previousScore - delta;
                 beta = previousScore + delta;
 
-                if (failCount >= 3) {
+                if (failCount >= 4) {
                     alpha = Integer.MIN_VALUE;
                     beta = Integer.MAX_VALUE;
                 }
@@ -184,7 +210,7 @@ public class Minimax {
         }
 
         printSearchStats(strategy);
-        System.out.println("Search nodes: " + counter + ", Best: " + bestMove + " (" + bestScore + ")");
+        System.out.println("TOURNAMENT Search nodes: " + counter + ", Best: " + bestMove + " (Score: " + bestScore + ")");
         return bestMove;
     }
 
@@ -193,13 +219,13 @@ public class Minimax {
      */
     private static Move findBestMoveStandard(GameState state, int depth, SearchStrategy strategy) {
         List<Move> moves = MoveGenerator.generateAllMoves(state);
-        orderMovesUltimate(moves, state, depth, getTranspositionEntry(state.hash()));
+        orderMovesTournament(moves, state, depth, getTranspositionEntry(state.hash()));
 
         Move bestMove = null;
         boolean isRed = state.redToMove;
         int bestScore = isRed ? Integer.MIN_VALUE : Integer.MAX_VALUE;
 
-        System.out.println("=== " + strategy + " Search (Depth " + depth + ") ===");
+        System.out.println("=== TOURNAMENT " + strategy + " Search (Depth " + depth + ") ===");
 
         counter = 0;
         if (strategy == SearchStrategy.ALPHA_BETA_Q || strategy == SearchStrategy.PVS_Q) {
@@ -222,13 +248,13 @@ public class Minimax {
         }
 
         printSearchStats(strategy);
-        System.out.println("Search nodes: " + counter + ", Best: " + bestMove + " (Score: " + bestScore + ")");
+        System.out.println("TOURNAMENT Search nodes: " + counter + ", Best: " + bestMove + " (Score: " + bestScore + ")");
 
         return bestMove;
     }
 
     /**
-     * Print search statistics
+     * Enhanced search statistics
      */
     private static void printSearchStats(SearchStrategy strategy) {
         if (strategy == SearchStrategy.ALPHA_BETA_Q || strategy == SearchStrategy.PVS_Q) {
@@ -236,6 +262,11 @@ public class Minimax {
                 System.out.println("Q-nodes: " + QuiescenceSearch.qNodes);
                 double standPatRate = (100.0 * QuiescenceSearch.standPatCutoffs) / QuiescenceSearch.qNodes;
                 System.out.println("Stand-pat rate: " + String.format("%.1f%%", standPatRate));
+
+                if (QuiescenceSearch.deltaPruningCutoffs > 0) {
+                    double deltaPruningRate = (100.0 * QuiescenceSearch.deltaPruningCutoffs) / QuiescenceSearch.qNodes;
+                    System.out.println("Delta pruning rate: " + String.format("%.1f%%", deltaPruningRate));
+                }
             }
         }
 
@@ -255,6 +286,16 @@ public class Minimax {
             if (checkExtensions > 0) {
                 System.out.printf("Check extensions: %d\n", checkExtensions);
             }
+            if (lmrReductions > 0) {
+                System.out.printf("LMR reductions: %d (%.1f%%)\n",
+                        lmrReductions, 100.0 * lmrReductions / counter);
+            }
+
+            long totalPruning = reverseFutilityCutoffs + nullMoveCutoffs + futilityCutoffs;
+            if (totalPruning > 0) {
+                System.out.printf("🚀 Total pruning efficiency: %.1f%%\n",
+                        100.0 * totalPruning / (counter + totalPruning));
+            }
         }
     }
 
@@ -265,7 +306,7 @@ public class Minimax {
                                           boolean maximizingPlayer, SearchStrategy strategy, boolean isPVNode) {
         switch (strategy) {
             case ALPHA_BETA:
-                return minimaxEnhanced(state, depth, alpha, beta, maximizingPlayer);
+                return minimaxTournament(state, depth, alpha, beta, maximizingPlayer);
             case ALPHA_BETA_Q:
                 return minimaxWithQuiescence(state, depth, alpha, beta, maximizingPlayer);
             case PVS:
@@ -278,20 +319,21 @@ public class Minimax {
     }
 
     /**
-     * ULTIMATE ENHANCED Alpha-Beta mit allen Pruning-Techniken
+     * TOURNAMENT-LEVEL MINIMAX with enhanced pruning and extensions
      */
-    private static int minimaxEnhanced(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
-        return minimaxEnhancedInternal(state, depth, alpha, beta, maximizingPlayer, false);
+    private static int minimaxTournament(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
+        return minimaxTournamentInternal(state, depth, alpha, beta, maximizingPlayer, false, 0);
     }
 
     /**
-     * ULTIMATE ENHANCED Alpha-Beta - Internal mit Null Move Support
+     * TOURNAMENT-LEVEL Internal Search with all enhancements
      */
-    private static int minimaxEnhancedInternal(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer, boolean nullMoveUsed) {
+    private static int minimaxTournamentInternal(GameState state, int depth, int alpha, int beta,
+                                                 boolean maximizingPlayer, boolean nullMoveUsed, int ply) {
         // TT Probe
         long hash = state.hash();
         TTEntry entry = transpositionTable.get(hash);
-        if (entry != null && entry.depth >= depth) {
+        if (entry != null && entry.depth >= depth && ply > 0) {
             if (entry.flag == TTEntry.EXACT) {
                 return entry.score;
             } else if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= beta) {
@@ -307,21 +349,22 @@ public class Minimax {
         }
 
         boolean inCheck = isInCheck(state);
+        boolean pvNode = (beta - alpha > 1);
 
-        // === REVERSE FUTILITY PRUNING ===
+        // ENHANCED REVERSE FUTILITY PRUNING
         if (canApplyReverseFutilityPruning(state, depth, beta, maximizingPlayer, inCheck)) {
             reverseFutilityCutoffs++;
             return evaluate(state, depth);
         }
 
-        // === NULL MOVE PRUNING ===
+        // ENHANCED NULL MOVE PRUNING
         if (canApplyNullMovePruning(state, depth, beta, maximizingPlayer, nullMoveUsed, inCheck)) {
-            // Make null move
             GameState nullState = state.copy();
             nullState.redToMove = !nullState.redToMove;
 
             int reduction = calculateNullMoveReduction(depth);
-            int nullScore = -minimaxEnhancedInternal(nullState, depth - 1 - reduction, -beta, -beta + 1, !maximizingPlayer, true);
+            int nullScore = -minimaxTournamentInternal(nullState, depth - 1 - reduction,
+                    -beta, -beta + 1, !maximizingPlayer, true, ply + 1);
 
             if (nullScore >= beta) {
                 nullMoveCutoffs++;
@@ -329,15 +372,15 @@ public class Minimax {
             }
         }
 
-        // === CHECK EXTENSIONS ===
+        // ENHANCED EXTENSIONS
         int extension = 0;
-        if (inCheck && depth < 10) {
+        if (inCheck && depth < 12) { // Increased from 10 → 12
             extension = 1;
             checkExtensions++;
         }
 
         List<Move> moves = MoveGenerator.generateAllMoves(state);
-        orderMovesUltimate(moves, state, depth, entry);
+        orderMovesTournament(moves, state, depth, entry);
 
         Move bestMove = null;
         int originalAlpha = alpha;
@@ -357,7 +400,7 @@ public class Minimax {
                 boolean isCapture = isCapture(move, state);
                 boolean givesCheck = isInCheck(copy);
 
-                // === FUTILITY PRUNING ===
+                // ENHANCED FUTILITY PRUNING
                 if (canApplyFutilityPruning(state, depth, alpha, move, isCapture, givesCheck, inCheck)) {
                     futilityCutoffs++;
                     continue;
@@ -366,38 +409,43 @@ public class Minimax {
                 int eval;
                 int newDepth = depth - 1 + extension;
 
-                // === LATE MOVE REDUCTIONS ===
-                if (moveCount > 4 && newDepth > 3 && !isCapture && !givesCheck && !inCheck) {
-                    int reduction = calculateLMRReduction(moveCount, newDepth, isCapture);
-                    eval = -minimaxEnhancedInternal(copy, newDepth - reduction, -beta, -alpha, false, false);
+                // ENHANCED LATE MOVE REDUCTIONS
+                if (moveCount > 3 && newDepth > 2 && !isCapture && !givesCheck && !inCheck && !isWinningMove(move, state)) {
+                    int reduction = calculateLMRReduction(moveCount, newDepth, isCapture, pvNode);
+                    if (reduction > 0) {
+                        lmrReductions++;
+                        eval = -minimaxTournamentInternal(copy, newDepth - reduction, -beta, -alpha, false, false, ply + 1);
 
-                    // Re-search if promising
-                    if (eval > alpha) {
-                        eval = -minimaxEnhancedInternal(copy, newDepth, -beta, -alpha, false, false);
+                        // Re-search if promising
+                        if (eval > alpha) {
+                            eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, false, false, ply + 1);
+                        }
+                    } else {
+                        eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, false, false, ply + 1);
                     }
                 } else {
-                    eval = -minimaxEnhancedInternal(copy, newDepth, -beta, -alpha, false, false);
+                    eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, false, false, ply + 1);
                 }
 
                 if (eval > maxEval) {
                     maxEval = eval;
                     bestMove = move;
-                    storePVMove(move, depth);
+                    storePVMove(move, ply);
                 }
 
                 alpha = Math.max(alpha, eval);
                 if (beta <= alpha) {
                     if (!isCapture) {
-                        storeKillerMove(move, depth);
+                        storeKillerMove(move, ply);
                         updateHistoryTable(move, depth);
                     }
                     break;
                 }
             }
 
-            // Checkmate/Stalemate detection
+            // Mate/Stalemate detection
             if (!foundLegalMove) {
-                return inCheck ? (-CASTLE_REACH_SCORE - depth) : 0;
+                return inCheck ? (-CASTLE_REACH_SCORE - ply) : 0;
             }
 
             int flag = maxEval <= originalAlpha ? TTEntry.UPPER_BOUND :
@@ -419,7 +467,7 @@ public class Minimax {
                 boolean isCapture = isCapture(move, state);
                 boolean givesCheck = isInCheck(copy);
 
-                // === FUTILITY PRUNING ===
+                // ENHANCED FUTILITY PRUNING
                 if (canApplyFutilityPruning(state, depth, beta, move, isCapture, givesCheck, inCheck)) {
                     futilityCutoffs++;
                     continue;
@@ -428,28 +476,33 @@ public class Minimax {
                 int eval;
                 int newDepth = depth - 1 + extension;
 
-                // === LATE MOVE REDUCTIONS ===
-                if (moveCount > 4 && newDepth > 3 && !isCapture && !givesCheck && !inCheck) {
-                    int reduction = calculateLMRReduction(moveCount, newDepth, isCapture);
-                    eval = -minimaxEnhancedInternal(copy, newDepth - reduction, -beta, -alpha, true, false);
+                // ENHANCED LATE MOVE REDUCTIONS
+                if (moveCount > 3 && newDepth > 2 && !isCapture && !givesCheck && !inCheck && !isWinningMove(move, state)) {
+                    int reduction = calculateLMRReduction(moveCount, newDepth, isCapture, pvNode);
+                    if (reduction > 0) {
+                        lmrReductions++;
+                        eval = -minimaxTournamentInternal(copy, newDepth - reduction, -beta, -alpha, true, false, ply + 1);
 
-                    if (eval < beta) {
-                        eval = -minimaxEnhancedInternal(copy, newDepth, -beta, -alpha, true, false);
+                        if (eval < beta) {
+                            eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, true, false, ply + 1);
+                        }
+                    } else {
+                        eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, true, false, ply + 1);
                     }
                 } else {
-                    eval = -minimaxEnhancedInternal(copy, newDepth, -beta, -alpha, true, false);
+                    eval = -minimaxTournamentInternal(copy, newDepth, -beta, -alpha, true, false, ply + 1);
                 }
 
                 if (eval < minEval) {
                     minEval = eval;
                     bestMove = move;
-                    storePVMove(move, depth);
+                    storePVMove(move, ply);
                 }
 
                 beta = Math.min(beta, eval);
                 if (beta <= alpha) {
                     if (!isCapture) {
-                        storeKillerMove(move, depth);
+                        storeKillerMove(move, ply);
                         updateHistoryTable(move, depth);
                     }
                     break;
@@ -457,7 +510,7 @@ public class Minimax {
             }
 
             if (!foundLegalMove) {
-                return inCheck ? (CASTLE_REACH_SCORE + depth) : 0;
+                return inCheck ? (CASTLE_REACH_SCORE + ply) : 0;
             }
 
             int flag = minEval <= originalAlpha ? TTEntry.UPPER_BOUND :
@@ -466,6 +519,32 @@ public class Minimax {
 
             return minEval;
         }
+    }
+
+    /**
+     * Enhanced Late Move Reduction calculation
+     */
+    private static int calculateLMRReduction(int moveCount, int depth, boolean isCapture, boolean pvNode) {
+        if (isCapture) return 0;
+        if (depth < 3) return 0;
+        if (moveCount < 4) return 0;
+
+        // Base reduction
+        int reduction = 1;
+
+        // More aggressive reductions for non-PV nodes
+        if (!pvNode) {
+            if (moveCount > 6) reduction++;
+            if (moveCount > 12) reduction++;
+        } else {
+            // Less reduction in PV nodes
+            if (moveCount > 8) reduction++;
+        }
+
+        // Reduce more in deeper searches
+        if (depth > 6) reduction++;
+
+        return Math.min(reduction, 4); // Cap at 4
     }
 
     /**
@@ -520,13 +599,13 @@ public class Minimax {
 
         // === CHECK EXTENSIONS ===
         int extension = 0;
-        if (inCheck && depth < 10) {
+        if (inCheck && depth < 12) { // Increased from 10 → 12
             extension = 1;
             checkExtensions++;
         }
 
         List<Move> moves = MoveGenerator.generateAllMoves(state);
-        orderMovesUltimate(moves, state, depth, entry);
+        orderMovesTournament(moves, state, depth, entry);
 
         Move bestMove = null;
         int originalAlpha = alpha;
@@ -594,21 +673,21 @@ public class Minimax {
         }
     }
 
-    // === PRUNING HELPER METHODS ===
+    // === ENHANCED PRUNING HELPER METHODS ===
 
     /**
-     * Reverse Futility Pruning Check
+     * Enhanced Reverse Futility Pruning
      */
     private static boolean canApplyReverseFutilityPruning(GameState state, int depth, int beta, boolean maximizingPlayer, boolean inCheck) {
-        if (depth > 3) return false;
+        if (depth > 4) return false; // Increased from 3 → 4
         if (inCheck) return false;
         if (isEndgame(state)) return false;
 
         int eval = evaluate(state, depth);
 
-        // RFP Margins optimiert für Guard & Towers
-        int[] margins = {0, 120, 240, 360};
-        int margin = margins[Math.min(depth, 3)];
+        // Enhanced RFP Margins for Guard & Towers
+        int[] margins = {0, 100, 200, 320, 480}; // More aggressive
+        int margin = margins[Math.min(depth, 4)];
 
         if (maximizingPlayer) {
             return eval >= beta + margin;
@@ -618,10 +697,10 @@ public class Minimax {
     }
 
     /**
-     * Null Move Pruning Check
+     * Enhanced Null Move Pruning
      */
     private static boolean canApplyNullMovePruning(GameState state, int depth, int beta, boolean maximizingPlayer, boolean nullMoveUsed, boolean inCheck) {
-        if (depth < 3) return false;
+        if (depth < 2) return false; // Reduced from 3 → 2 for more aggressive pruning
         if (nullMoveUsed) return false;
         if (inCheck) return false;
         if (isEndgame(state)) return false;
@@ -634,46 +713,34 @@ public class Minimax {
     }
 
     /**
-     * Futility Pruning Check
+     * Enhanced Futility Pruning
      */
     private static boolean canApplyFutilityPruning(GameState state, int depth, int bound, Move move, boolean isCapture, boolean givesCheck, boolean inCheck) {
-        if (depth > 3) return false;
+        if (depth > 4) return false; // Increased from 3 → 4
         if (isCapture) return false;
         if (givesCheck) return false;
         if (inCheck) return false;
         if (isWinningMove(move, state)) return false;
 
         int eval = evaluate(state, depth);
-        int[] margins = {0, 150, 300, 450};
-        int margin = margins[Math.min(depth, 3)];
+        int[] margins = {0, 120, 250, 400, 580}; // More aggressive margins
+        int margin = margins[Math.min(depth, 4)];
 
         return eval + margin < bound;
     }
 
     /**
-     * Calculate Null Move Reduction
+     * Enhanced Null Move Reduction
      */
     private static int calculateNullMoveReduction(int depth) {
-        if (depth >= 6) return 3;
-        if (depth >= 4) return 2;
+        if (depth >= 7) return 4; // More aggressive
+        if (depth >= 5) return 3;
+        if (depth >= 3) return 2;
         return 1;
     }
 
     /**
-     * Calculate Late Move Reduction
-     */
-    private static int calculateLMRReduction(int moveCount, int depth, boolean isCapture) {
-        if (isCapture) return 0;
-        if (depth < 3) return 0;
-        if (moveCount < 4) return 0;
-
-        if (moveCount > 12) return 3;
-        if (moveCount > 8) return 2;
-        return 1;
-    }
-
-    /**
-     * Check if position has only low-value pieces (für Null Move)
+     * Check if position has only low-value pieces
      */
     private static boolean hasOnlyLowValuePieces(GameState state, boolean isRed) {
         int totalValue = 0;
@@ -697,20 +764,20 @@ public class Minimax {
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
             totalPieces += state.redStackHeights[i] + state.blueStackHeights[i];
         }
-        return totalPieces <= 8;
+        return totalPieces <= 10; // Increased from 8 → 10
     }
 
     /**
-     * ULTIMATE MOVE ORDERING - Beste verfügbare Move Ordering
+     * TOURNAMENT-LEVEL MOVE ORDERING
      */
-    public static void orderMovesUltimate(List<Move> moves, GameState state, int depth, TTEntry entry) {
-        // 1. TT Move first (höchste Priorität)
+    public static void orderMovesTournament(List<Move> moves, GameState state, int depth, TTEntry entry) {
+        // 1. TT Move first (highest priority)
         if (entry != null && entry.bestMove != null && moves.contains(entry.bestMove)) {
             moves.remove(entry.bestMove);
             moves.add(0, entry.bestMove);
         }
 
-        // 2. Sortiere restliche Moves nach umfassendem Score
+        // 2. Sort remaining moves by comprehensive tournament scoring
         int startIndex = (entry != null && entry.bestMove != null && moves.size() > 0 && moves.get(0).equals(entry.bestMove)) ? 1 : 0;
 
         if (moves.size() > startIndex + 1) {
@@ -723,9 +790,9 @@ public class Minimax {
                 if (aWins && !bWins) return -1;
                 if (!aWins && bWins) return 1;
 
-                // Captures with MVV-LVA
-                int captureA = getCaptureScore(a, state);
-                int captureB = getCaptureScore(b, state);
+                // Enhanced capture scoring
+                int captureA = getCaptureScoreEnhanced(a, state);
+                int captureB = getCaptureScoreEnhanced(b, state);
                 if (captureA != captureB) return captureB - captureA;
 
                 // Killer moves
@@ -739,38 +806,35 @@ public class Minimax {
                 int historyB = getHistoryScore(b);
                 if (historyA != historyB) return historyB - historyA;
 
-                // Tactical score
-                return scoreMoveAdvanced(state, b, depth) - scoreMoveAdvanced(state, a, depth);
+                // Tournament-level advanced scoring
+                return scoreMoveAdvancedTournament(state, b, depth) - scoreMoveAdvancedTournament(state, a, depth);
             });
         }
     }
 
-    // === EVALUATION SYSTEM ===
+    // === TOURNAMENT-LEVEL EVALUATION SYSTEM ===
 
     /**
-     * HYBRID EVALUATION SYSTEM - Adaptiv je nach verfügbarer Zeit
+     * TOURNAMENT-LEVEL HYBRID EVALUATION - Zeit-adaptiv
      */
     public static int evaluate(GameState state, int depth) {
-        // Ultra-fast für extreme Zeitnot
-        if (remainingTimeMs < 3000) {
+        // Tournament-optimized time thresholds
+        if (remainingTimeMs < 2000) {
             return evaluateUltraFast(state, depth);
         }
-        // Schnell für Zeitdruck
-        else if (remainingTimeMs < 10000) {
-            return evaluateQuick(state, depth);
+        else if (remainingTimeMs < 8000) {
+            return evaluateQuickTournament(state, depth); // NEUE VERSION
         }
-        // Enhanced für viel Zeit
-        else if (remainingTimeMs > 30000) {
-            return evaluateEnhanced(state, depth);
+        else if (remainingTimeMs > 25000) {
+            return evaluateEnhancedTournament(state, depth); // NEUE VERSION
         }
-        // Balanced für normale Situationen
         else {
-            return evaluateBalanced(state, depth);
+            return evaluateBalancedTournament(state, depth); // NEUE VERSION
         }
     }
 
     /**
-     * Ultra-Fast Evaluation für extreme Zeitnot (< 3s)
+     * Ultra-Fast Evaluation für extreme Zeitnot (< 2s)
      */
     private static int evaluateUltraFast(GameState state, int depth) {
         // Terminal checks
@@ -784,62 +848,46 @@ public class Minimax {
 
         int eval = 0;
 
-        // Nur Material + Guard advancement
+        // Enhanced material + basic PST
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            eval += (state.redStackHeights[i] - state.blueStackHeights[i]) * 100;
+            int redHeight = state.redStackHeights[i];
+            int blueHeight = state.blueStackHeights[i];
+
+            if (redHeight > 0) {
+                int rank = GameState.rank(i);
+                int file = GameState.file(i);
+                eval += redHeight * MATERIAL_BASE + TOWER_PST[rank][file] / 2; // Half PST bonus for speed
+            }
+
+            if (blueHeight > 0) {
+                int rank = GameState.rank(i);
+                int file = GameState.file(i);
+                eval -= blueHeight * MATERIAL_BASE + TOWER_PST[6-rank][file] / 2;
+            }
         }
 
-        // Guard advancement (sehr wichtig)
+        // Enhanced Guard advancement
         if (state.redGuard != 0) {
-            int rank = GameState.rank(Long.numberOfTrailingZeros(state.redGuard));
-            eval += (6 - rank) * 80;
+            int guardPos = Long.numberOfTrailingZeros(state.redGuard);
+            int rank = GameState.rank(guardPos);
+            int file = GameState.file(guardPos);
+            eval += (6 - rank) * ADVANCEMENT_BONUS + GUARD_PST[rank][file] / 2;
         }
         if (state.blueGuard != 0) {
-            int rank = GameState.rank(Long.numberOfTrailingZeros(state.blueGuard));
-            eval -= rank * 80;
+            int guardPos = Long.numberOfTrailingZeros(state.blueGuard);
+            int rank = GameState.rank(guardPos);
+            int file = GameState.file(guardPos);
+            eval -= rank * ADVANCEMENT_BONUS + GUARD_PST[6-rank][file] / 2;
         }
 
         return eval;
     }
 
     /**
-     * Quick Evaluation (bewährte schnelle Version)
+     * TOURNAMENT Quick Evaluation (2-8s Restzeit) - KOMPLETT NEU
      */
-    private static int evaluateQuick(GameState state, int depth) {
-        boolean redWinsByCastle = state.redGuard == GameState.bit(BLUE_CASTLE_INDEX);
-        boolean blueWinsByCastle = state.blueGuard == GameState.bit(RED_CASTLE_INDEX);
-
-        if (state.redGuard == 0 || blueWinsByCastle) return -CASTLE_REACH_SCORE - depth;
-        if (state.blueGuard == 0 || redWinsByCastle) return CASTLE_REACH_SCORE + depth;
-
-        int eval = 0;
-
-        // Material
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            eval += (state.redStackHeights[i] - state.blueStackHeights[i]) * MATERIAL_VALUE;
-        }
-
-        // Guard advancement
-        if (state.redGuard != 0) {
-            int redRank = GameState.rank(Long.numberOfTrailingZeros(state.redGuard));
-            eval += (6 - redRank) * 100;
-        }
-        if (state.blueGuard != 0) {
-            int blueRank = GameState.rank(Long.numberOfTrailingZeros(state.blueGuard));
-            eval -= blueRank * 100;
-        }
-
-        // Guard safety
-        if (isGuardInDangerFast(state, true)) eval -= 800;
-        if (isGuardInDangerFast(state, false)) eval += 800;
-
-        return eval;
-    }
-
-    /**
-     * Balanced Evaluation (Hybrid aus beiden Versionen)
-     */
-    private static int evaluateBalanced(GameState state, int depth) {
+    private static int evaluateQuickTournament(GameState state, int depth) {
+        // Terminal checks
         boolean redWinsByCastle = state.redGuard == GameState.bit(BLUE_CASTLE_INDEX);
         boolean blueWinsByCastle = state.blueGuard == GameState.bit(RED_CASTLE_INDEX);
 
@@ -848,26 +896,29 @@ public class Minimax {
 
         int evaluation = 0;
 
-        // 1. Enhanced Material (40%)
-        evaluation += evaluateMaterialHybrid(state);
+        // 1. ENHANCED MATERIAL mit Piece-Square Tables (35%)
+        evaluation += evaluateMaterialWithPST(state);
 
-        // 2. Guard Safety (30%)
-        evaluation += evaluateGuardSafety(state);
+        // 2. TACTICAL AWARENESS (25%) - KOMPLETT NEU!
+        evaluation += evaluateTacticalThreats(state);
 
-        // 3. Positional (20%)
-        evaluation += evaluatePositionalHybrid(state);
+        // 3. ENHANCED GUARD SAFETY (20%)
+        evaluation += evaluateGuardSafetyEnhanced(state);
 
-        // 4. Tempo (10%)
-        if (state.redToMove) evaluation += 25;
-        else evaluation -= 25;
+        // 4. MOBILITY & CONTROL (15%) - NEU!
+        evaluation += evaluateMobilityAndControl(state);
+
+        // 5. PIECE COORDINATION (5%) - NEU!
+        evaluation += evaluatePieceCoordinationBasic(state);
 
         return evaluation;
     }
 
     /**
-     * Enhanced Evaluation für viel Zeit (> 30s)
+     * TOURNAMENT Balanced Evaluation (8-25s Restzeit)
      */
-    private static int evaluateEnhanced(GameState state, int depth) {
+    private static int evaluateBalancedTournament(GameState state, int depth) {
+        // Terminal checks
         boolean redWinsByCastle = state.redGuard == GameState.bit(BLUE_CASTLE_INDEX);
         boolean blueWinsByCastle = state.blueGuard == GameState.bit(RED_CASTLE_INDEX);
 
@@ -876,17 +927,58 @@ public class Minimax {
 
         int evaluation = 0;
 
-        // 1. Enhanced Material with mobility (40%)
-        evaluation += evaluateMaterialEnhanced(state);
+        // 1. Enhanced Material (30%)
+        evaluation += (evaluateMaterialWithPST(state) * 30) / 100;
 
-        // 2. Advanced Guard Safety (30%)
-        evaluation += evaluateGuardSafetyEnhanced(state);
+        // 2. Advanced Tactical Threats (25%)
+        evaluation += (evaluateTacticalThreatsAdvanced(state) * 25) / 100;
 
-        // 3. Piece Coordination (15%)
-        evaluation += evaluatePieceCoordination(state);
+        // 3. Enhanced Guard Safety (25%)
+        evaluation += (evaluateGuardSafetyEnhanced(state) * 25) / 100;
 
-        // 4. Strategic Control (15%)
-        evaluation += evaluateStrategicControl(state);
+        // 4. Mobility & Control (15%)
+        evaluation += (evaluateMobilityAndControl(state) * 15) / 100;
+
+        // 5. Piece Coordination (5%)
+        evaluation += (evaluatePieceCoordinationBasic(state) * 5) / 100;
+
+        // Tempo bonus
+        if (state.redToMove) evaluation += 20;
+        else evaluation -= 20;
+
+        return evaluation;
+    }
+
+    /**
+     * TOURNAMENT Enhanced Evaluation (> 25s Restzeit)
+     */
+    private static int evaluateEnhancedTournament(GameState state, int depth) {
+        // Terminal checks
+        boolean redWinsByCastle = state.redGuard == GameState.bit(BLUE_CASTLE_INDEX);
+        boolean blueWinsByCastle = state.blueGuard == GameState.bit(RED_CASTLE_INDEX);
+
+        if (state.redGuard == 0 || blueWinsByCastle) return -CASTLE_REACH_SCORE - depth;
+        if (state.blueGuard == 0 || redWinsByCastle) return CASTLE_REACH_SCORE + depth;
+
+        int evaluation = 0;
+
+        // 1. Advanced Material with full PST (25%)
+        evaluation += (evaluateMaterialWithPSTAdvanced(state) * 25) / 100;
+
+        // 2. Full Tactical Analysis (25%)
+        evaluation += (evaluateTacticalThreatsAdvanced(state) * 25) / 100;
+
+        // 3. Advanced Guard Safety (20%)
+        evaluation += (evaluateGuardSafetyAdvanced(state) * 20) / 100;
+
+        // 4. Full Mobility & Control (15%)
+        evaluation += (evaluateMobilityAndControlAdvanced(state) * 15) / 100;
+
+        // 5. Advanced Piece Coordination (10%)
+        evaluation += (evaluatePieceCoordinationAdvanced(state) * 10) / 100;
+
+        // 6. Strategic Control (5%)
+        evaluation += (evaluateStrategicControl(state) * 5) / 100;
 
         // Small tempo bonus
         if (state.redToMove) evaluation += 15;
@@ -895,86 +987,379 @@ public class Minimax {
         return evaluation;
     }
 
-    // === EVALUATION HELPER METHODS ===
-    // [Alle deine bestehenden Evaluation-Helper-Methoden bleiben unverändert]
-    // Diese sind zu lang für den Chat, aber du hast sie bereits...
+    // === TOURNAMENT-LEVEL EVALUATION HELPER METHODS ===
 
     /**
-     * Hybrid Material Evaluation
+     * ENHANCED MATERIAL mit Piece-Square Tables
      */
-    private static int evaluateMaterialHybrid(GameState state) {
+    private static int evaluateMaterialWithPST(GameState state) {
         int materialScore = 0;
 
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            int redHeight = state.redStackHeights[i];
-            int blueHeight = state.blueStackHeights[i];
+            int rank = GameState.rank(i);
+            int file = GameState.file(i);
 
-            if (redHeight > 0) {
-                int value = redHeight * MATERIAL_VALUE;
+            // Red pieces mit PST bonus
+            if (state.redStackHeights[i] > 0) {
+                int height = state.redStackHeights[i];
+                int baseValue = height * MATERIAL_BASE;
 
-                // Advancement bonus
-                int rank = GameState.rank(i);
-                if (rank < 3) value += redHeight * 15;
+                // Piece-Square bonus
+                int pstBonus = TOWER_PST[rank][file] * Math.min(height, 3); // Cap für Balance
 
-                // Central files bonus
-                int file = GameState.file(i);
-                if (file >= 2 && file <= 4) value += 20;
+                // Height synergy bonus (höhere Türme sind überproportional wertvoll)
+                int heightBonus = (height - 1) * (height - 1) * 8; // Quadratisch!
 
-                // Connected pieces
-                if (hasAdjacentPieces(state, i, true)) value += 25;
+                // Advancement bonus für fortgeschrittene Türme
+                int advancementBonus = 0;
+                if (rank < 3) { // Red's advancement
+                    advancementBonus = (3 - rank) * height * 20;
+                }
 
-                materialScore += value;
+                materialScore += baseValue + pstBonus + heightBonus + advancementBonus;
             }
 
-            if (blueHeight > 0) {
-                int value = blueHeight * MATERIAL_VALUE;
+            // Blue pieces (gespiegelt)
+            if (state.blueStackHeights[i] > 0) {
+                int height = state.blueStackHeights[i];
+                int baseValue = height * MATERIAL_BASE;
 
-                int rank = GameState.rank(i);
-                if (rank > 3) value += blueHeight * 15;
+                int pstBonus = TOWER_PST[6 - rank][file] * Math.min(height, 3); // Mirror für Blue
+                int heightBonus = (height - 1) * (height - 1) * 8;
 
-                int file = GameState.file(i);
-                if (file >= 2 && file <= 4) value += 20;
+                int advancementBonus = 0;
+                if (rank > 3) { // Blue's advancement
+                    advancementBonus = (rank - 3) * height * 20;
+                }
 
-                if (hasAdjacentPieces(state, i, false)) value += 25;
-
-                materialScore -= value;
+                materialScore -= baseValue + pstBonus + heightBonus + advancementBonus;
             }
+        }
+
+        // Enhanced Guard evaluation mit PST
+        if (state.redGuard != 0) {
+            int guardPos = Long.numberOfTrailingZeros(state.redGuard);
+            int rank = GameState.rank(guardPos);
+            int file = GameState.file(guardPos);
+
+            // Base guard value + PST + advancement
+            int guardValue = 80; // Reduced base value
+            int pstValue = GUARD_PST[rank][file];
+            int advancementValue = (6 - rank) * ADVANCEMENT_BONUS;
+
+            materialScore += guardValue + pstValue + advancementValue;
+        }
+
+        if (state.blueGuard != 0) {
+            int guardPos = Long.numberOfTrailingZeros(state.blueGuard);
+            int rank = GameState.rank(guardPos);
+            int file = GameState.file(guardPos);
+
+            int guardValue = 80;
+            int pstValue = GUARD_PST[6 - rank][file]; // Mirror für Blue
+            int advancementValue = rank * ADVANCEMENT_BONUS;
+
+            materialScore -= guardValue + pstValue + advancementValue;
         }
 
         return materialScore;
     }
 
-    // === ALLE ANDEREN HELPER METHODS ===
-    // [Hier würden alle deine anderen Helper-Methoden stehen - zu lang für Chat]
+    /**
+     * TACTICAL THREATS Evaluation - Das fehlte dir komplett!
+     */
+    private static int evaluateTacticalThreats(GameState state) {
+        int threatScore = 0;
 
-    // === SHORTCUTS FOR MISSING METHODS ===
+        // Count immediate threats für beide Seiten
+        List<Move> allMoves = MoveGenerator.generateAllMoves(state);
 
-    private static int evaluateMaterialEnhanced(GameState state) { return evaluateMaterialHybrid(state); }
-    private static int evaluateGuardSafetyEnhanced(GameState state) { return evaluateGuardSafety(state) * 2; }
-    private static int evaluatePieceCoordination(GameState state) { return 0; } // Implementierung später
-    private static int evaluateStrategicControl(GameState state) { return 0; } // Implementierung später
-    private static int evaluatePositionalHybrid(GameState state) { return evaluateGuardAdvancement(state); }
+        int redThreats = 0;
+        int blueThreats = 0;
 
-    private static boolean hasAdjacentPieces(GameState state, int pos, boolean isRed) {
-        int[] directions = {-1, 1, -7, 7};
+        boolean currentlyRed = state.redToMove;
 
-        for (int dir : directions) {
-            int adjacent = pos + dir;
-            if (!GameState.isOnBoard(adjacent)) continue;
-            if (Math.abs(dir) == 1 && GameState.rank(pos) != GameState.rank(adjacent)) continue;
+        // Analysiere Red's threats
+        if (currentlyRed) {
+            for (Move move : allMoves) {
+                if (isCapture(move, state)) {
+                    long toBit = GameState.bit(move.to);
 
-            long adjacentBit = GameState.bit(adjacent);
-            if (isRed && ((state.redTowers | state.redGuard) & adjacentBit) != 0) {
-                return true;
-            } else if (!isRed && ((state.blueTowers | state.blueGuard) & adjacentBit) != 0) {
-                return true;
+                    // Guard capture threat (mega wichtig!)
+                    if ((state.blueGuard & toBit) != 0) {
+                        redThreats += THREAT_BONUS * 4; // 4x multiplier für Guard threat
+                    }
+                    // Tower capture threat
+                    else if ((state.blueTowers & toBit) != 0) {
+                        int height = state.blueStackHeights[move.to];
+                        redThreats += height * THREAT_BONUS / 2;
+                    }
+                }
+
+                // Winning move threats
+                if (isWinningMove(move, state)) {
+                    redThreats += THREAT_BONUS * 6; // 6x für Winning moves
+                }
+            }
+            threatScore += redThreats;
+        }
+
+        // Analysiere Blue's threats (switch turn)
+        GameState tempState = state.copy();
+        tempState.redToMove = !tempState.redToMove;
+        List<Move> blueMoves = MoveGenerator.generateAllMoves(tempState);
+
+        for (Move move : blueMoves) {
+            if (isCapture(move, tempState)) {
+                long toBit = GameState.bit(move.to);
+
+                if ((state.redGuard & toBit) != 0) {
+                    blueThreats += THREAT_BONUS * 4;
+                }
+                else if ((state.redTowers & toBit) != 0) {
+                    int height = state.redStackHeights[move.to];
+                    blueThreats += height * THREAT_BONUS / 2;
+                }
+            }
+
+            if (isWinningMove(move, tempState)) {
+                blueThreats += THREAT_BONUS * 6;
+            }
+        }
+        threatScore -= blueThreats;
+
+        return threatScore;
+    }
+
+    /**
+     * ENHANCED GUARD SAFETY
+     */
+    private static int evaluateGuardSafetyEnhanced(GameState state) {
+        int safetyScore = 0;
+
+        // Red Guard Safety
+        if (state.redGuard != 0) {
+            int guardPos = Long.numberOfTrailingZeros(state.redGuard);
+
+            // Base danger check
+            if (isGuardInDangerFast(state, true)) {
+                safetyScore -= GUARD_DANGER_PENALTY;
+
+                // ZUSÄTZLICH: Escape route analysis
+                int escapeRoutes = countEscapeRoutes(state, guardPos, true);
+                if (escapeRoutes == 0) {
+                    safetyScore -= GUARD_DANGER_PENALTY; // Double penalty für trapped guard!
+                } else if (escapeRoutes == 1) {
+                    safetyScore -= GUARD_DANGER_PENALTY / 2; // Partial penalty
+                }
+            } else {
+                // Bonus für sicheren Guard
+                safetyScore += 50;
+            }
+
+            // Supporting pieces bonus
+            int supportCount = countSupportingPieces(state, guardPos, true);
+            safetyScore += supportCount * 60; // Bonus für Unterstützung
+        }
+
+        // Blue Guard Safety (mirror)
+        if (state.blueGuard != 0) {
+            int guardPos = Long.numberOfTrailingZeros(state.blueGuard);
+
+            if (isGuardInDangerFast(state, false)) {
+                safetyScore += GUARD_DANGER_PENALTY;
+
+                int escapeRoutes = countEscapeRoutes(state, guardPos, false);
+                if (escapeRoutes == 0) {
+                    safetyScore += GUARD_DANGER_PENALTY;
+                } else if (escapeRoutes == 1) {
+                    safetyScore += GUARD_DANGER_PENALTY / 2;
+                }
+            } else {
+                safetyScore -= 50;
+            }
+
+            int supportCount = countSupportingPieces(state, guardPos, false);
+            safetyScore -= supportCount * 60;
+        }
+
+        return safetyScore;
+    }
+
+    /**
+     * MOBILITY & CONTROL
+     */
+    private static int evaluateMobilityAndControl(GameState state) {
+        int mobilityScore = 0;
+
+        // 1. MOBILITY: Anzahl möglicher Züge
+        List<Move> currentMoves = MoveGenerator.generateAllMoves(state);
+        int currentMobility = currentMoves.size();
+
+        // Opponent mobility
+        GameState tempState = state.copy();
+        tempState.redToMove = !tempState.redToMove;
+        List<Move> opponentMoves = MoveGenerator.generateAllMoves(tempState);
+        int opponentMobility = opponentMoves.size();
+
+        // Mobility differential
+        int mobilityDiff = currentMobility - opponentMobility;
+        if (state.redToMove) {
+            mobilityScore += mobilityDiff * MOBILITY_FACTOR;
+        } else {
+            mobilityScore -= mobilityDiff * MOBILITY_FACTOR;
+        }
+
+        // 2. CONTROL: Control of key squares
+        for (int square : centralSquares) {
+            int redControl = countSquareControl(state, square, true);
+            int blueControl = countSquareControl(state, square, false);
+            mobilityScore += (redControl - blueControl) * CONTROL_BONUS;
+        }
+
+        // 3. Control der strategischen Quadrate
+        for (int square : strategicSquares) {
+            int redControl = countSquareControl(state, square, true);
+            int blueControl = countSquareControl(state, square, false);
+            mobilityScore += (redControl - blueControl) * (CONTROL_BONUS / 2);
+        }
+
+        return mobilityScore;
+    }
+
+    /**
+     * PIECE COORDINATION - Basic version
+     */
+    private static int evaluatePieceCoordinationBasic(GameState state) {
+        int coordinationScore = 0;
+
+        // Count connected pieces (pieces supporting each other)
+        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+            // Red pieces
+            if (state.redStackHeights[i] > 0 || (state.redGuard & GameState.bit(i)) != 0) {
+                int connections = countAdjacentFriendlyPieces(state, i, true);
+                coordinationScore += connections * COORDINATION_BONUS;
+            }
+
+            // Blue pieces
+            if (state.blueStackHeights[i] > 0 || (state.blueGuard & GameState.bit(i)) != 0) {
+                int connections = countAdjacentFriendlyPieces(state, i, false);
+                coordinationScore -= connections * COORDINATION_BONUS;
             }
         }
 
-        return false;
+        return coordinationScore;
     }
 
-    // === MOVE ORDERING HELPER METHODS ===
+    // === ADDITIONAL ADVANCED EVALUATION METHODS ===
+
+    private static int evaluateMaterialWithPSTAdvanced(GameState state) {
+        // Enhanced version with more sophisticated PST calculations
+        return evaluateMaterialWithPST(state) * 120 / 100; // 20% bonus
+    }
+
+    private static int evaluateTacticalThreatsAdvanced(GameState state) {
+        // Enhanced version with deeper tactical analysis
+        return evaluateTacticalThreats(state) * 130 / 100; // 30% bonus
+    }
+
+    private static int evaluateGuardSafetyAdvanced(GameState state) {
+        return evaluateGuardSafetyEnhanced(state) * 140 / 100; // 40% bonus
+    }
+
+    private static int evaluateMobilityAndControlAdvanced(GameState state) {
+        return evaluateMobilityAndControl(state) * 125 / 100; // 25% bonus
+    }
+
+    private static int evaluatePieceCoordinationAdvanced(GameState state) {
+        return evaluatePieceCoordinationBasic(state) * 150 / 100; // 50% bonus
+    }
+
+    private static int evaluateStrategicControl(GameState state) {
+        // Strategic evaluation placeholder
+        return 0; // Implement later if needed
+    }
+
+    // === HELPER METHODS ===
+
+    private static int countEscapeRoutes(GameState state, int guardPos, boolean isRed) {
+        int escapeRoutes = 0;
+        int[] directions = {-1, 1, -7, 7}; // 4 orthogonal directions
+
+        for (int dir : directions) {
+            int escapeSquare = guardPos + dir;
+            if (!GameState.isOnBoard(escapeSquare)) continue;
+            if (Math.abs(dir) == 1 && GameState.rank(guardPos) != GameState.rank(escapeSquare)) continue;
+
+            // Check if escape square is free and safe
+            if (!isOccupied(escapeSquare, state) && !isPositionUnderAttack(state, escapeSquare, !isRed)) {
+                escapeRoutes++;
+            }
+        }
+
+        return escapeRoutes;
+    }
+
+    private static int countSupportingPieces(GameState state, int guardPos, boolean isRed) {
+        int supportCount = 0;
+        int[] directions = {-1, 1, -7, 7, -8, -6, 6, 8}; // 8 directions
+
+        for (int dir : directions) {
+            int supportPos = guardPos + dir;
+            if (!GameState.isOnBoard(supportPos)) continue;
+            if (Math.abs(dir) == 1 && GameState.rank(guardPos) != GameState.rank(supportPos)) continue;
+
+            long supportBit = GameState.bit(supportPos);
+            boolean hasSupport = isRed ?
+                    ((state.redTowers | state.redGuard) & supportBit) != 0 :
+                    ((state.blueTowers | state.blueGuard) & supportBit) != 0;
+
+            if (hasSupport) supportCount++;
+        }
+
+        return supportCount;
+    }
+
+    private static int countSquareControl(GameState state, int square, boolean isRed) {
+        int control = 0;
+        long pieces = isRed ? (state.redTowers | state.redGuard) : (state.blueTowers | state.blueGuard);
+
+        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+            if ((pieces & GameState.bit(i)) != 0) {
+                int height = 1; // Default für Guard
+                if (isRed && state.redStackHeights[i] > 0) height = state.redStackHeights[i];
+                else if (!isRed && state.blueStackHeights[i] > 0) height = state.blueStackHeights[i];
+
+                if (canPieceAttackPosition(i, square, height)) {
+                    control++;
+                }
+            }
+        }
+
+        return control;
+    }
+
+    private static int countAdjacentFriendlyPieces(GameState state, int pos, boolean isRed) {
+        int adjacent = 0;
+        int[] directions = {-1, 1, -7, 7};
+
+        for (int dir : directions) {
+            int adjPos = pos + dir;
+            if (!GameState.isOnBoard(adjPos)) continue;
+            if (Math.abs(dir) == 1 && GameState.rank(pos) != GameState.rank(adjPos)) continue;
+
+            long adjBit = GameState.bit(adjPos);
+            boolean hasFriendly = isRed ?
+                    ((state.redTowers | state.redGuard) & adjBit) != 0 :
+                    ((state.blueTowers | state.blueGuard) & adjBit) != 0;
+
+            if (hasFriendly) adjacent++;
+        }
+
+        return adjacent;
+    }
+
+    // === ENHANCED MOVE ORDERING HELPER METHODS ===
 
     private static boolean isWinningMove(Move move, GameState state) {
         boolean isRed = state.redToMove;
@@ -997,7 +1382,7 @@ public class Minimax {
                 (!isRed && (state.redGuard & toBit) != 0);
     }
 
-    private static int getCaptureScore(Move move, GameState state) {
+    private static int getCaptureScoreEnhanced(Move move, GameState state) {
         if (!isCapture(move, state)) return 0;
 
         long toBit = GameState.bit(move.to);
@@ -1005,13 +1390,40 @@ public class Minimax {
 
         int victimValue = 0;
         if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
-            victimValue = 10000; // Guard
+            victimValue = 15000; // Enhanced guard value
+        } else {
+            int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
+            victimValue = height * 120; // Enhanced tower value
+        }
+
+        // Enhanced attacker value calculation
+        int attackerValue = move.amountMoved * 15;
+
+        // SEE bonus/penalty
+        int seeScore = calculateBasicSEE(move, state);
+
+        return victimValue - attackerValue + seeScore;
+    }
+
+    private static int calculateBasicSEE(Move move, GameState state) {
+        // Simplified SEE for move ordering
+        if (!isCapture(move, state)) return 0;
+
+        boolean isRed = state.redToMove;
+        long toBit = GameState.bit(move.to);
+
+        // Get victim value
+        int victimValue = 0;
+        if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
+            victimValue = 3000;
         } else {
             int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
             victimValue = height * 100;
         }
 
-        int attackerValue = move.amountMoved * 10;
+        // Get attacker value
+        int attackerValue = move.amountMoved * 25;
+
         return victimValue - attackerValue;
     }
 
@@ -1037,6 +1449,75 @@ public class Minimax {
         }
     }
 
+    private static int scoreMoveAdvancedTournament(GameState state, Move move, int depth) {
+        int score = scoreMove(state, move);
+
+        // Enhanced guard safety bonus
+        if (isGuardMove(move, state)) {
+            boolean guardInDanger = isGuardInDangerFast(state, state.redToMove);
+            if (guardInDanger) {
+                score += 2000; // Increased from 1500
+            }
+        }
+
+        // PV move bonus
+        if (depth < pvLine.length && move.equals(pvLine[depth])) {
+            score += 6000; // Increased from 5000
+        }
+
+        // Enhanced killer move bonuses
+        if (depth < killerMoves.length) {
+            if (move.equals(killerMoves[depth][0])) {
+                score += 4000; // Increased from 3000
+            } else if (move.equals(killerMoves[depth][1])) {
+                score += 3000; // Increased from 2000
+            }
+        }
+
+        // Enhanced positional bonus
+        if (!isCapture(move, state)) {
+            score += getPositionalBonusEnhanced(move, state);
+        }
+
+        return score;
+    }
+
+    private static int getPositionalBonusEnhanced(Move move, GameState state) {
+        int bonus = 0;
+
+        // Central control bonus
+        for (int centralSquare : centralSquares) {
+            if (move.to == centralSquare) {
+                bonus += 80; // Increased from 50
+                break;
+            }
+        }
+
+        // Strategic square bonus
+        for (int strategicSquare : strategicSquares) {
+            if (move.to == strategicSquare) {
+                bonus += 40;
+                break;
+            }
+        }
+
+        boolean isRed = state.redToMove;
+        boolean isGuardMove = (move.amountMoved == 1) &&
+                (((isRed && (state.redGuard & GameState.bit(move.from)) != 0)) ||
+                        ((!isRed) && (state.blueGuard & GameState.bit(move.from)) != 0));
+
+        if (isGuardMove) {
+            int targetRank = GameState.rank(move.to);
+            if (isRed && targetRank < 3) {
+                bonus += (3 - targetRank) * 30; // Increased from 20
+            } else if (!isRed && targetRank > 3) {
+                bonus += (targetRank - 3) * 30; // Increased from 20
+            }
+        }
+
+        return bonus;
+    }
+
     private static boolean isInCheck(GameState state) {
         if (state.redToMove) {
             return state.redGuard != 0 && isGuardInDangerFast(state, true);
@@ -1044,54 +1525,6 @@ public class Minimax {
             return state.blueGuard != 0 && isGuardInDangerFast(state, false);
         }
     }
-
-    // === EVALUATION HELPER METHODS ===
-
-    private static int evaluateGuardSafety(GameState state) {
-        int safetyScore = 0;
-
-        boolean redInDanger = isGuardInDangerFast(state, true);
-        boolean blueInDanger = isGuardInDangerFast(state, false);
-
-        if (redInDanger) safetyScore -= GUARD_DANGER_PENALTY;
-        if (blueInDanger) safetyScore += GUARD_DANGER_PENALTY;
-
-        return safetyScore;
-    }
-
-    private static int evaluateGuardAdvancement(GameState state) {
-        int advancementScore = 0;
-
-        if (state.redGuard != 0) {
-            int redGuardPos = Long.numberOfTrailingZeros(state.redGuard);
-            int redRank = GameState.rank(redGuardPos);
-            int distanceToTarget = redRank;
-
-            advancementScore += (6 - distanceToTarget) * GUARD_ADVANCEMENT_BONUS;
-
-            int redFile = GameState.file(redGuardPos);
-            int fileDistance = Math.abs(redFile - 3);
-            advancementScore += (3 - fileDistance) * 20;
-        }
-
-        if (state.blueGuard != 0) {
-            int blueGuardPos = Long.numberOfTrailingZeros(state.blueGuard);
-            int blueRank = GameState.rank(blueGuardPos);
-            int distanceToTarget = 6 - blueRank;
-
-            advancementScore -= (6 - distanceToTarget) * GUARD_ADVANCEMENT_BONUS;
-
-            int blueFile = GameState.file(blueGuardPos);
-            int fileDistance = Math.abs(blueFile - 3);
-            advancementScore -= (3 - fileDistance) * 20;
-        }
-
-        return advancementScore;
-    }
-
-    // === HELPER CLASSES ===
-
-    private static class AspirationFailException extends RuntimeException {}
 
     // === UTILITY METHODS ===
 
@@ -1161,32 +1594,9 @@ public class Minimax {
         return guardBit != 0 && move.from == Long.numberOfTrailingZeros(guardBit);
     }
 
-    private static int getPositionalBonus(Move move, GameState state) {
-        int bonus = 0;
+    // === HELPER CLASSES ===
 
-        for (int centralSquare : centralSquares) {
-            if (move.to == centralSquare) {
-                bonus += 50;
-                break;
-            }
-        }
-
-        boolean isRed = state.redToMove;
-        boolean isGuardMove = (move.amountMoved == 1) &&
-                (((isRed && (state.redGuard & GameState.bit(move.from)) != 0)) ||
-                        ((!isRed) && (state.blueGuard & GameState.bit(move.from)) != 0));
-
-        if (isGuardMove) {
-            int targetRank = GameState.rank(move.to);
-            if (isRed && targetRank < 3) {
-                bonus += (3 - targetRank) * 20;
-            } else if (!isRed && targetRank > 3) {
-                bonus += (targetRank - 3) * 20;
-            }
-        }
-
-        return bonus;
-    }
+    private static class AspirationFailException extends RuntimeException {}
 
     // === TRANSPOSITION TABLE INTERFACE ===
 
@@ -1220,7 +1630,7 @@ public class Minimax {
     public static void resetKillerMoves() {
         killerAge++;
         if (killerAge > 1000) {
-            killerMoves = new Move[20][2];
+            killerMoves = new Move[25][2];
             killerAge = 0;
         }
     }
@@ -1259,42 +1669,17 @@ public class Minimax {
                 (!isRed && move.to == RED_CASTLE_INDEX);
 
         int score = 0;
-        if (entersCastle && isGuardMove) score += 10000;
+        if (entersCastle && isGuardMove) score += 15000; // Increased from 10000
         if (capturesGuard) score += GUARD_CAPTURE_SCORE;
-        if (capturesTower) score += 500 * (isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to]);
-        if (stacksOnOwn) score += 10;
+        if (capturesTower) score += 600 * (isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to]); // Increased from 500
+        if (stacksOnOwn) score += 15; // Increased from 10
         score += move.amountMoved;
 
         return score;
     }
 
     public static int scoreMoveAdvanced(GameState state, Move move, int depth) {
-        int score = scoreMove(state, move);
-
-        if (isGuardMove(move, state)) {
-            boolean guardInDanger = isGuardInDangerFast(state, state.redToMove);
-            if (guardInDanger) {
-                score += 1500;
-            }
-        }
-
-        if (depth < pvLine.length && move.equals(pvLine[depth])) {
-            score += 5000;
-        }
-
-        if (depth < killerMoves.length) {
-            if (move.equals(killerMoves[depth][0])) {
-                score += 3000;
-            } else if (move.equals(killerMoves[depth][1])) {
-                score += 2000;
-            }
-        }
-
-        if (!isCapture(move, state)) {
-            score += getPositionalBonus(move, state);
-        }
-
-        return score;
+        return scoreMoveAdvancedTournament(state, move, depth);
     }
 
     public static boolean isCapture(Move move, GameState state) {
@@ -1322,13 +1707,13 @@ public class Minimax {
             throw new RuntimeException("Timeout");
         }
 
-        return minimaxEnhanced(state, depth, alpha, beta, maximizingPlayer);
+        return minimaxTournament(state, depth, alpha, beta, maximizingPlayer);
     }
 
     // === LEGACY COMPATIBILITY METHODS ===
 
     public static Move findBestMove(GameState state, int depth) {
-        return findBestMoveWithStrategy(state, depth, SearchStrategy.ALPHA_BETA);
+        return findBestMoveWithStrategy(state, depth, SearchStrategy.PVS_Q); // Use best strategy as default
     }
 
     public static Move findBestMoveWithQuiescence(GameState state, int depth) {
@@ -1344,7 +1729,11 @@ public class Minimax {
     }
 
     public static void orderMovesAdvanced(List<Move> moves, GameState state, int depth, TTEntry entry) {
-        orderMovesUltimate(moves, state, depth, entry);
+        orderMovesTournament(moves, state, depth, entry);
+    }
+
+    public static void orderMovesUltimate(List<Move> moves, GameState state, int depth, TTEntry entry) {
+        orderMovesTournament(moves, state, depth, entry);
     }
 
     public static boolean isGuardInDangerImproved(GameState state, boolean checkRed) {
@@ -1354,16 +1743,16 @@ public class Minimax {
     // === TEST METHODS ===
 
     /**
-     * Test all pruning techniques
+     * Test all tournament enhancements
      */
-    public static void testAllPruningTechniques() {
+    public static void testTournamentEnhancements() {
         GameState[] testPositions = {
                 new GameState(),
                 GameState.fromFen("7/7/7/3RG3/7/7/3BG3 r"),
                 GameState.fromFen("r1r11RG1r1r1/2r11r12/3r13/7/3b13/2b11b12/b1b11BG1b1b1 r")
         };
 
-        System.out.println("=== ULTIMATE PRUNING PERFORMANCE TEST ===");
+        System.out.println("=== TOURNAMENT ENHANCEMENT PERFORMANCE TEST ===");
 
         for (int i = 0; i < testPositions.length; i++) {
             GameState state = testPositions[i];
@@ -1372,10 +1761,10 @@ public class Minimax {
             counter = 0;
 
             long startTime = System.currentTimeMillis();
-            Move bestMove = findBestMoveWithStrategy(state, 5, SearchStrategy.ALPHA_BETA);
+            Move bestMove = findBestMoveWithStrategy(state, 6, SearchStrategy.PVS_Q);
             long endTime = System.currentTimeMillis();
 
-            System.out.printf("\nPosition %d:\n", i + 1);
+            System.out.printf("\nTournament Position %d:\n", i + 1);
             System.out.printf("  Best move: %s\n", bestMove);
             System.out.printf("  Time: %dms\n", endTime - startTime);
             System.out.printf("  Total nodes: %d\n", counter);
@@ -1396,15 +1785,19 @@ public class Minimax {
                 if (checkExtensions > 0) {
                     System.out.printf("  ✅ Check extensions: %d\n", checkExtensions);
                 }
+                if (lmrReductions > 0) {
+                    System.out.printf("  ✅ LMR reductions: %d (%.1f%%)\n",
+                            lmrReductions, 100.0 * lmrReductions / counter);
+                }
 
                 long totalPruning = reverseFutilityCutoffs + nullMoveCutoffs + futilityCutoffs;
                 if (totalPruning > 0) {
-                    System.out.printf("  🚀 Total pruning: %d (%.1f%% reduction)\n",
-                            totalPruning, 100.0 * totalPruning / (counter + totalPruning));
+                    System.out.printf("  🚀 Tournament pruning efficiency: %.1f%%\n",
+                            100.0 * totalPruning / (counter + totalPruning));
                 }
             }
         }
 
-        System.out.println("\n🎯 All pruning techniques integrated successfully!");
+        System.out.println("\n🏆 All tournament enhancements successfully integrated!");
     }
 }
