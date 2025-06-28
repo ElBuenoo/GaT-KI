@@ -1,11 +1,11 @@
 package GaT.search.strategy;
 
 import GaT.model.*;
-import GaT.search.*;
+import GaT.search.MoveGenerator;
 import java.util.List;
 
 /**
- * PVS Strategy - OHNE zirkuläre Abhängigkeiten zu Minimax
+ * Principal Variation Search implementation
  */
 public class PVSStrategy implements ISearchStrategy {
 
@@ -13,40 +13,47 @@ public class PVSStrategy implements ISearchStrategy {
 
     @Override
     public SearchResult search(SearchContext context) {
-        // Initial search with aspiration windows
+        long startTime = System.currentTimeMillis();
+
+        // Try aspiration window
         int alpha = context.alpha;
         int beta = context.beta;
 
-        // Try aspiration window if not at root
-        if (context.depth > 1 && Math.abs(alpha) < 10000) {
-            alpha = Math.max(context.alpha, alpha - ASPIRATION_WINDOW);
-            beta = Math.min(context.beta, beta + ASPIRATION_WINDOW);
+        if (context.depth > 3) {
+            // Get previous iteration score from TT if available
+            TTEntry entry = context.ttable.get(context.state.hash());
+            if (entry != null && entry.flag == TTEntry.EXACT) {
+                alpha = Math.max(context.alpha, entry.score - ASPIRATION_WINDOW);
+                beta = Math.min(context.beta, entry.score + ASPIRATION_WINDOW);
+            }
         }
 
         try {
-            return searchPVS(context, alpha, beta);
+            return performPVS(context.withWindow(alpha, beta), startTime);
         } catch (AspirationFailException e) {
             // Re-search with full window
-            System.out.println("Aspiration window failed, re-searching...");
-            return searchPVS(context, context.alpha, context.beta);
+            System.out.println("Aspiration fail - researching with full window");
+            context.statistics.reset(); // Reset stats for clean search
+            return performPVS(context, startTime);
         }
     }
 
-    private SearchResult searchPVS(SearchContext context, int alpha, int beta) {
+    private SearchResult performPVS(SearchContext context, long startTime) {
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
         if (moves.isEmpty()) {
-            int score = context.evaluator.evaluate(context.state, context.depth);
-            return new SearchResult(null, score, context.depth,
-                    context.statistics.getNodeCount());
+            int score = context.evaluator.evaluate(context.state, 0);
+            return new SearchResult(null, score, 0, context.statistics.getNodeCount());
         }
 
-        // Order moves - TT move first if available
+        // Order moves
         TTEntry ttEntry = context.ttable.get(context.state.hash());
         context.moveOrdering.orderMoves(moves, context.state, context.depth, ttEntry);
 
         Move bestMove = null;
-        int bestScore = Integer.MIN_VALUE;
+        int bestScore = Integer.MIN_VALUE + 1;
         boolean firstMove = true;
+        int alpha = context.alpha;
+        int beta = context.beta;
 
         for (Move move : moves) {
             GameState newState = context.state.copy();
@@ -55,19 +62,22 @@ public class PVSStrategy implements ISearchStrategy {
             int score;
 
             if (firstMove) {
-                // First move - search with full window
-                score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                        -beta, -alpha);
+                // First move - full window search
+                SearchContext childContext = context.withNewState(newState, context.depth - 1)
+                        .withWindow(-beta, -alpha);
+                score = -pvSearch(childContext, true);
                 firstMove = false;
             } else {
                 // Null window search
-                score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                        -alpha - 1, -alpha);
+                SearchContext nullContext = context.withNewState(newState, context.depth - 1)
+                        .withWindow(-alpha - 1, -alpha);
+                score = -pvSearch(nullContext, false);
 
                 // Re-search if failed high
                 if (score > alpha && score < beta) {
-                    score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                            -beta, -alpha);
+                    SearchContext fullContext = context.withNewState(newState, context.depth - 1)
+                            .withWindow(-beta, -alpha);
+                    score = -pvSearch(fullContext, false);
                 }
             }
 
@@ -79,10 +89,7 @@ public class PVSStrategy implements ISearchStrategy {
             alpha = Math.max(alpha, score);
 
             if (alpha >= beta) {
-                // Store killer move
-                if (!isCapture(move, context.state)) {
-                    context.moveOrdering.storeKillerMove(move, context.depth);
-                }
+                context.statistics.incrementAlphaBetaCutoffs();
                 break;
             }
         }
@@ -92,20 +99,25 @@ public class PVSStrategy implements ISearchStrategy {
             throw new AspirationFailException();
         }
 
+        // Store in TT
+        storeInTT(context, context.state.hash(), bestScore, context.alpha, beta, bestMove);
+
+        long timeMs = System.currentTimeMillis() - startTime;
         return new SearchResult(bestMove, bestScore, context.depth,
-                context.statistics.getNodeCount());
+                context.statistics.getNodeCount(), timeMs, false);
     }
 
-    private int pvSearch(SearchContext context, int alpha, int beta) {
+    protected int pvSearch(SearchContext context, boolean isPVNode) {
         context.statistics.incrementNodeCount();
 
         // Timeout check
         if (context.timeoutChecker.getAsBoolean()) {
-            throw new SearchTimeoutException();
+            throw new RuntimeException("Search timeout");
         }
 
         // Terminal node
-        if (context.depth <= 0 || isGameOver(context.state)) {
+        if (context.depth <= 0 || GameRules.isGameOver(context.state)) {
+            context.statistics.incrementLeafNodeCount();
             return context.evaluator.evaluate(context.state, context.depth);
         }
 
@@ -113,51 +125,61 @@ public class PVSStrategy implements ISearchStrategy {
         long hash = context.state.hash();
         TTEntry entry = context.ttable.get(hash);
         if (entry != null && entry.depth >= context.depth) {
-            if (entry.flag == TTEntry.EXACT) {
-                context.statistics.incrementTTHits();
+            context.statistics.incrementTTHits();
+
+            if (entry.flag == TTEntry.EXACT && (!isPVNode || context.depth <= 2)) {
                 return entry.score;
             }
-            // Bounds checking for non-PV nodes
-            if (!context.isPVNode) {
-                if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= beta) {
+
+            if (!isPVNode) {
+                if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= context.beta) {
                     return entry.score;
                 }
-                if (entry.flag == TTEntry.UPPER_BOUND && entry.score <= alpha) {
+                if (entry.flag == TTEntry.UPPER_BOUND && entry.score <= context.alpha) {
                     return entry.score;
                 }
             }
+        } else {
+            context.statistics.incrementTTMisses();
         }
 
         // Move generation
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
+        context.statistics.addMovesGenerated(moves.size());
+
         if (moves.isEmpty()) {
             return context.evaluator.evaluate(context.state, context.depth);
         }
 
         context.moveOrdering.orderMoves(moves, context.state, context.depth, entry);
 
-        int bestScore = Integer.MIN_VALUE;
+        int bestScore = Integer.MIN_VALUE + 1;
         Move bestMove = null;
         boolean firstMove = true;
+        int alpha = context.alpha;
 
         for (Move move : moves) {
             GameState newState = context.state.copy();
             newState.applyMove(move);
+            context.statistics.addMovesSearched(1);
 
             int score;
 
             if (firstMove) {
-                score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                        -beta, -alpha);
+                SearchContext childContext = context.withNewState(newState, context.depth - 1)
+                        .withWindow(-context.beta, -alpha);
+                score = -pvSearch(childContext, isPVNode);
                 firstMove = false;
             } else {
                 // Null window
-                score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                        -alpha - 1, -alpha);
+                SearchContext nullContext = context.withNewState(newState, context.depth - 1)
+                        .withWindow(-alpha - 1, -alpha);
+                score = -pvSearch(nullContext, false);
 
-                if (score > alpha && score < beta) {
-                    score = -pvSearch(context.withNewState(newState, context.depth - 1),
-                            -beta, -alpha);
+                if (score > alpha && score < context.beta) {
+                    SearchContext fullContext = context.withNewState(newState, context.depth - 1)
+                            .withWindow(-context.beta, -alpha);
+                    score = -pvSearch(fullContext, false);
                 }
             }
 
@@ -168,8 +190,9 @@ public class PVSStrategy implements ISearchStrategy {
 
             alpha = Math.max(alpha, score);
 
-            if (alpha >= beta) {
-                if (!isCapture(move, context.state)) {
+            if (alpha >= context.beta) {
+                context.statistics.incrementAlphaBetaCutoffs();
+                if (!GameRules.isCapture(move, context.state)) {
                     context.moveOrdering.storeKillerMove(move, context.depth);
                 }
                 break;
@@ -177,15 +200,15 @@ public class PVSStrategy implements ISearchStrategy {
         }
 
         // Store in TT
-        storeTTEntry(context, hash, bestScore, alpha, beta, bestMove);
+        storeInTT(context, hash, bestScore, context.alpha, context.beta, bestMove);
 
         return bestScore;
     }
 
-    private void storeTTEntry(SearchContext context, long hash, int score,
-                              int alpha, int beta, Move bestMove) {
+    private void storeInTT(SearchContext context, long hash, int score,
+                           int originalAlpha, int beta, Move bestMove) {
         int flag;
-        if (score <= alpha) {
+        if (score <= originalAlpha) {
             flag = TTEntry.UPPER_BOUND;
         } else if (score >= beta) {
             flag = TTEntry.LOWER_BOUND;
@@ -197,47 +220,10 @@ public class PVSStrategy implements ISearchStrategy {
         context.statistics.incrementTTStores();
     }
 
-    private boolean isCapture(Move move, GameState state) {
-        long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers |
-                state.redGuard | state.blueGuard) & toBit) != 0;
-    }
-
-    private boolean isGameOver(GameState state) {
-        // Moved from Minimax - no circular dependency!
-        if (state.redGuard == 0 || state.blueGuard == 0) {
-            return true;
-        }
-
-        int redGuardPos = Long.numberOfTrailingZeros(state.redGuard);
-        int blueGuardPos = Long.numberOfTrailingZeros(state.blueGuard);
-
-        return redGuardPos == GameState.getIndex(0, 3) ||
-                blueGuardPos == GameState.getIndex(6, 3);
-    }
-
     @Override
     public String getName() {
         return "PVS";
     }
 
-    // Helper exceptions
     private static class AspirationFailException extends RuntimeException {}
-    private static class SearchTimeoutException extends RuntimeException {}
-}
-
-// ===== Erweiterung für SearchContext =====
-// In SearchContext.java hinzufügen:
-
-public SearchContext withNewState(GameState newState, int newDepth) {
-    return new Builder()
-            .state(newState)
-            .depth(newDepth)
-            .window(this.alpha, this.beta)
-            .maximizingPlayer(!this.maximizingPlayer)
-            .pvNode(this.isPVNode)
-            .timeoutChecker(this.timeoutChecker)
-            .components(this.evaluator, this.ttable,
-                    this.moveOrdering, this.statistics)
-            .build();
 }

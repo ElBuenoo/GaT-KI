@@ -7,7 +7,8 @@ import GaT.search.SearchStatistics;
 import java.util.function.BooleanSupplier;
 
 /**
- * Immutable context object containing all search parameters
+ * Complete SearchContext implementation
+ * Contains all parameters needed for search operations
  */
 public class SearchContext {
     public final GameState state;
@@ -31,21 +32,51 @@ public class SearchContext {
         this.beta = builder.beta;
         this.maximizingPlayer = builder.maximizingPlayer;
         this.isPVNode = builder.isPVNode;
-        this.timeoutChecker = builder.timeoutChecker;
+        this.timeoutChecker = builder.timeoutChecker != null ? builder.timeoutChecker : () -> false;
         this.evaluator = builder.evaluator;
         this.ttable = builder.ttable;
         this.moveOrdering = builder.moveOrdering;
         this.statistics = builder.statistics;
     }
 
+    /**
+     * Create a new context with different state and depth
+     */
+    public SearchContext withNewState(GameState newState, int newDepth) {
+        return new Builder()
+                .state(newState)
+                .depth(newDepth)
+                .window(this.alpha, this.beta)
+                .maximizingPlayer(!this.maximizingPlayer)
+                .pvNode(this.isPVNode)
+                .timeoutChecker(this.timeoutChecker)
+                .components(this.evaluator, this.ttable, this.moveOrdering, this.statistics)
+                .build();
+    }
+
+    /**
+     * Create a new context with different window
+     */
+    public SearchContext withWindow(int newAlpha, int newBeta) {
+        return new Builder()
+                .state(this.state)
+                .depth(this.depth)
+                .window(newAlpha, newBeta)
+                .maximizingPlayer(this.maximizingPlayer)
+                .pvNode(this.isPVNode)
+                .timeoutChecker(this.timeoutChecker)
+                .components(this.evaluator, this.ttable, this.moveOrdering, this.statistics)
+                .build();
+    }
+
     public static class Builder {
         private GameState state;
         private int depth;
-        private int alpha = Integer.MIN_VALUE;
-        private int beta = Integer.MAX_VALUE;
+        private int alpha = Integer.MIN_VALUE + 1;  // Avoid overflow
+        private int beta = Integer.MAX_VALUE - 1;
         private boolean maximizingPlayer = true;
         private boolean isPVNode = false;
-        private BooleanSupplier timeoutChecker = () -> false;
+        private BooleanSupplier timeoutChecker;
         private Evaluator evaluator;
         private TranspositionTable ttable;
         private MoveOrdering moveOrdering;
@@ -92,6 +123,10 @@ public class SearchContext {
         }
 
         public SearchContext build() {
+            if (state == null || evaluator == null || ttable == null ||
+                    moveOrdering == null || statistics == null) {
+                throw new IllegalStateException("Missing required components");
+            }
             return new SearchContext(this);
         }
     }
