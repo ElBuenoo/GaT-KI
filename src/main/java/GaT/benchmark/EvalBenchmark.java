@@ -1,6 +1,5 @@
 package GaT.benchmark;
 
-import GaT.search.Minimax;
 import GaT.model.GameState;
 
 import java.util.ArrayList;

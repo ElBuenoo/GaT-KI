@@ -1,6 +1,5 @@
 import GaT.model.GameState;
 import GaT.model.TTEntry;
-import GaT.search.Minimax;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import GaT.search.MoveGenerator;
