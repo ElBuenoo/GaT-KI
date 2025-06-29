@@ -3,7 +3,6 @@ import GaT.model.Move;
 import GaT.model.SearchConfig;
 import GaT.search.*;
 import GaT.evaluation.Evaluator;
-import GaT.engine.TimedMinimax;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.After;

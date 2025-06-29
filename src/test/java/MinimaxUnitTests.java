@@ -5,7 +5,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 import GaT.search.MoveGenerator;
 import GaT.model.Move;
-import GaT.engine.TimedMinimax;
+
 import java.util.List;
 
 public class MinimaxUnitTests {

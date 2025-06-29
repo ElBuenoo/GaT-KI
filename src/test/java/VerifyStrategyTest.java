@@ -1,7 +1,6 @@
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.SearchConfig;
-import GaT.engine.TimedMinimax;
 import GaT.search.*;
 import org.junit.Before;
 import org.junit.Test;
