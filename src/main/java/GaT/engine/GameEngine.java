@@ -1,6 +1,7 @@
 package GaT.engine;
 
 import GaT.model.*;
+import GaT.search.SearchCoordinator;
 import GaT.search.SearchStatistics;
 
 /**
