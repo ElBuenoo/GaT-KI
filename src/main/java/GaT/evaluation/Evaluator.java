@@ -1,473 +1,306 @@
 package GaT.evaluation;
 
 import GaT.model.GameState;
+import GaT.model.SearchConfig;
 import GaT.search.MoveGenerator;
 import GaT.model.Move;
 
 import java.util.List;
 
 /**
- * FIXED EVALUATOR - Balanced and Stable
+ * ENHANCED EVALUATOR - Now properly integrates all evaluation components
  *
- * CRITICAL FIXES:
- * ✅ 1. Removed extreme aggressive bonuses that caused wild scores
- * ✅ 2. Fixed evaluation stability and consistency
- * ✅ 3. Proper material vs positional balance
- * ✅ 4. Fixed game-ending condition detection
- * ✅ 5. Robust error handling for edge cases
- * ✅ 6. Tournament-ready evaluation
+ * This version uses MaterialEval, PositionalEval, SafetyEval, and TacticalEvaluator
+ * instead of reimplementing everything from scratch.
  */
 public class Evaluator {
 
-    // === BALANCED EVALUATION CONSTANTS ===
-    private static final int TOWER_BASE_VALUE = 100;
-    private static final int GUARD_BASE_VALUE = 50;
-    private static final int CASTLE_REACH_SCORE = 5000;  // Reduced from 10000
-    private static final int GUARD_CAPTURE_SCORE = 4000; // Reduced from 8000
+    // === COMPONENT EVALUATORS ===
+    private final MaterialEval materialEval;
+    private final PositionalEval positionalEval;
+    private final SafetyEval safetyEval;
 
-    // === REASONABLE BONUSES ===
-    private static final int GUARD_ADVANCEMENT_BONUS = 25;  // Was 60
-    private static final int CENTRAL_BONUS = 15;            // Was 40
-    private static final int MOBILITY_BONUS = 8;            // Was 15
-    private static final int COORDINATION_BONUS = 12;       // Was 25
-    private static final int THREAT_BONUS = 30;             // Was 100
+    // === TERMINAL POSITION SCORES ===
+    private static final int CHECKMATE_SCORE = 50000;
+    private static final int CASTLE_REACH_SCORE = 40000;
 
-    // === STRATEGIC SQUARES ===
-    private static final int[] CENTRAL_SQUARES = {
-            GameState.getIndex(2, 3), GameState.getIndex(3, 3), GameState.getIndex(4, 3) // D3, D4, D5
-    };
-
-    // === CASTLE POSITIONS ===
-    private static final int RED_CASTLE = GameState.getIndex(0, 3);  // D1
-    private static final int BLUE_CASTLE = GameState.getIndex(6, 3); // D7
-
-    // === TIME-ADAPTIVE EVALUATION ===
+    // === TIME MANAGEMENT ===
     private static volatile long remainingTimeMs = 180000;
     private static volatile boolean emergencyMode = false;
 
+    // === EVALUATION WEIGHTS ===
+    private static class Weights {
+        // Base component weights
+        static final double MATERIAL = 1.0;
+        static final double POSITIONAL = 0.6;
+        static final double SAFETY = 0.8;
+        static final double TACTICAL = 0.4;
+
+        // Game phase adjustments
+        static final double[] OPENING = {1.0, 0.7, 0.5, 0.3};
+        static final double[] MIDDLEGAME = {1.0, 0.8, 1.0, 0.6};
+        static final double[] ENDGAME = {0.8, 1.2, 0.9, 0.5};
+    }
+
     /**
-     * FIXED MAIN EVALUATION - Stable and Balanced
+     * Constructor - Initialize all evaluation components
+     */
+    public Evaluator() {
+        this.materialEval = new MaterialEval();
+        this.positionalEval = new PositionalEval();
+        this.safetyEval = new SafetyEval();
+    }
+
+    /**
+     * MAIN EVALUATION METHOD - Now uses all components intelligently
      */
     public int evaluate(GameState state, int depth) {
         if (state == null) return 0;
 
         // === TERMINAL POSITION CHECK ===
-        int terminalScore = checkTerminalPositionFixed(state, depth);
-        if (terminalScore != 0) {
+        int terminalScore = checkTerminalPosition(state, depth);
+        if (Math.abs(terminalScore) >= CASTLE_REACH_SCORE) {
             return terminalScore;
         }
 
-        // === BALANCED EVALUATION STRATEGY ===
+        // === DETECT GAME PHASE ===
+        MaterialEval.GamePhase phase = detectGamePhase(state);
+
+        // === TIME-ADAPTIVE EVALUATION STRATEGY ===
         emergencyMode = remainingTimeMs < 1000;
 
         if (emergencyMode) {
-            return evaluateBasic(state);
+            return evaluateEmergency(state);
         } else if (remainingTimeMs < 5000) {
-            return evaluateStandard(state);
+            return evaluateFast(state, phase);
+        } else if (remainingTimeMs < 30000) {
+            return evaluateStandard(state, phase, depth);
         } else {
-            return evaluateComprehensive(state);
+            return evaluateComprehensive(state, phase, depth);
         }
     }
 
-    // === TERMINAL POSITION EVALUATION - FIXED ===
-    private int checkTerminalPositionFixed(GameState state, int depth) {
+    // === TERMINAL POSITION EVALUATION ===
+    private int checkTerminalPosition(GameState state, int depth) {
         // Guard captured
-        if (state.redGuard == 0) return -GUARD_CAPTURE_SCORE - depth;
-        if (state.blueGuard == 0) return GUARD_CAPTURE_SCORE + depth;
+        if (state.redGuard == 0) return -CHECKMATE_SCORE - depth;
+        if (state.blueGuard == 0) return CHECKMATE_SCORE + depth;
 
         // Guard reached enemy castle
-        boolean redWins = (state.redGuard & GameState.bit(RED_CASTLE)) != 0;
-        boolean blueWins = (state.blueGuard & GameState.bit(BLUE_CASTLE)) != 0;
+        if (state.redGuard != 0) {
+            int redGuardPos = Long.numberOfTrailingZeros(state.redGuard);
+            if (redGuardPos == GameState.getIndex(0, 3)) {
+                return CASTLE_REACH_SCORE + depth;
+            }
+        }
 
-        if (redWins) return CASTLE_REACH_SCORE + depth;
-        if (blueWins) return -CASTLE_REACH_SCORE - depth;
+        if (state.blueGuard != 0) {
+            int blueGuardPos = Long.numberOfTrailingZeros(state.blueGuard);
+            if (blueGuardPos == GameState.getIndex(6, 3)) {
+                return -CASTLE_REACH_SCORE - depth;
+            }
+        }
 
         return 0;
     }
 
-    // === BASIC EVALUATION (Emergency) ===
-    private int evaluateBasic(GameState state) {
+    // === EMERGENCY EVALUATION (< 1 second) ===
+    private int evaluateEmergency(GameState state) {
+        // Just material count
+        return materialEval.evaluateMaterialSimple(state);
+    }
+
+    // === FAST EVALUATION (< 5 seconds) ===
+    private int evaluateFast(GameState state, MaterialEval.GamePhase phase) {
         int eval = 0;
 
-        // Simple material count
-        eval += evaluateMaterialBasic(state);
+        // Basic material with simple positional bonuses
+        eval += materialEval.evaluateMaterialBasic(state);
 
-        // Basic guard advancement
-        eval += evaluateGuardAdvancementBasic(state);
+        // Fast guard advancement check
+        eval += positionalEval.evaluateGuardAdvancementFast(state) / 2;
+
+        // Quick safety check
+        if (safetyEval.isGuardInDanger(state, true)) eval -= 300;
+        if (safetyEval.isGuardInDanger(state, false)) eval += 300;
 
         return eval;
     }
 
-    // === STANDARD EVALUATION ===
-    private int evaluateStandard(GameState state) {
+    // === STANDARD EVALUATION (< 30 seconds) ===
+    private int evaluateStandard(GameState state, MaterialEval.GamePhase phase, int depth) {
+        double[] weights = getPhaseWeights(phase);
         int eval = 0;
 
-        // Balanced weights
-        eval += evaluateMaterialWithPosition(state) * 60 / 100;     // 60%
-        eval += evaluateGuardAdvancement(state) * 25 / 100;         // 25%
-        eval += evaluateTacticalThreats(state) * 10 / 100;          // 10%
-        eval += evaluateMobility(state) * 5 / 100;                  // 5%
+        // Material evaluation with activity
+        int material = materialEval.evaluateMaterialWithActivity(state);
+        eval += (int)(material * weights[0]);
+
+        // Positional evaluation
+        int positional = positionalEval.evaluatePositional(state);
+        eval += (int)(positional * weights[1]);
+
+        // Safety evaluation
+        int safety = safetyEval.evaluateGuardSafety(state);
+        eval += (int)(safety * weights[2]);
+
+        // Basic tactical threats
+        int tactical = evaluateBasicTactics(state);
+        eval += (int)(tactical * weights[3]);
 
         return eval;
     }
 
-    // === COMPREHENSIVE EVALUATION ===
-    private int evaluateComprehensive(GameState state) {
+    // === COMPREHENSIVE EVALUATION (plenty of time) ===
+    private int evaluateComprehensive(GameState state, MaterialEval.GamePhase phase, int depth) {
+        double[] weights = getPhaseWeights(phase);
         int eval = 0;
 
-        // Comprehensive evaluation
-        eval += evaluateMaterialWithPosition(state) * 50 / 100;     // 50%
-        eval += evaluateGuardAdvancement(state) * 20 / 100;         // 20%
-        eval += evaluateTacticalThreats(state) * 15 / 100;          // 15%
-        eval += evaluateMobility(state) * 10 / 100;                 // 10%
-        eval += evaluatePositionalFactors(state) * 5 / 100;         // 5%
+        // Advanced material evaluation
+        int material = materialEval.evaluateMaterialAdvanced(state);
+        eval += (int)(material * weights[0]);
+
+        // Advanced positional evaluation
+        int positional = positionalEval.evaluatePositionalAdvanced(state);
+        eval += (int)(positional * weights[1]);
+
+        // Advanced safety evaluation
+        int safety = safetyEval.evaluateGuardSafetyAdvanced(state);
+        eval += (int)(safety * weights[2]);
+
+        // Advanced tactical evaluation (using TacticalEvaluator)
+        TacticalEvaluator tacticalEval = new TacticalEvaluator();
+        int tactical = tacticalEval.evaluate(state, depth);
+        eval += (int)(tactical * weights[3] * 0.3); // Reduced to prevent wild swings
+
+        // Piece activity bonus
+        eval += materialEval.evaluatePieceActivity(state) / 3;
+
+        // Endgame-specific evaluation
+        if (phase == MaterialEval.GamePhase.ENDGAME) {
+            eval += evaluateEndgameSpecific(state);
+        }
 
         return eval;
     }
 
-    // === MATERIAL EVALUATION - BALANCED ===
-    private int evaluateMaterialBasic(GameState state) {
-        int materialScore = 0;
+    // === HELPER EVALUATION METHODS ===
 
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            materialScore += state.redStackHeights[i] * TOWER_BASE_VALUE;
-            materialScore -= state.blueStackHeights[i] * TOWER_BASE_VALUE;
+    /**
+     * Basic tactical evaluation (faster than TacticalEvaluator)
+     */
+    private int evaluateBasicTactics(GameState state) {
+        int tacticalScore = 0;
+
+        // Count immediate threats
+        int threats = safetyEval.countThreats(state);
+        tacticalScore += threats * 50;
+
+        // Check for guard threats
+        if (safetyEval.isGuardInDanger(state, !state.redToMove)) {
+            tacticalScore += state.redToMove ? 200 : -200;
         }
 
-        return materialScore;
+        return tacticalScore;
     }
 
-    private int evaluateMaterialWithPosition(GameState state) {
-        int materialScore = 0;
+    /**
+     * Endgame-specific evaluation factors
+     */
+    private int evaluateEndgameSpecific(GameState state) {
+        int endgameScore = 0;
 
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            int redHeight = state.redStackHeights[i];
-            int blueHeight = state.blueStackHeights[i];
+        // Guard advancement is critical in endgame
+        endgameScore += positionalEval.evaluateGuardAdvancement(state) * 2;
 
-            if (redHeight > 0) {
-                int value = redHeight * TOWER_BASE_VALUE;
-                value += getPositionalBonus(i, redHeight, true);
-                materialScore += value;
-            }
+        // King activity (guard mobility in endgame)
+        endgameScore += positionalEval.evaluateKingActivity(state);
 
-            if (blueHeight > 0) {
-                int value = blueHeight * TOWER_BASE_VALUE;
-                value += getPositionalBonus(i, blueHeight, false);
-                materialScore -= value;
-            }
-        }
+        // Opposition and zugzwang potential
+        endgameScore += evaluateOpposition(state);
 
-        return materialScore;
+        return endgameScore;
     }
 
-    private int getPositionalBonus(int square, int height, boolean isRed) {
-        int bonus = 0;
-        int rank = GameState.rank(square);
-        int file = GameState.file(square);
+    /**
+     * Evaluate opposition in endgame
+     */
+    private int evaluateOpposition(GameState state) {
+        if (state.redGuard == 0 || state.blueGuard == 0) return 0;
 
-        // Moderate advancement bonus
-        if (isRed && rank < 4) {
-            bonus += (4 - rank) * 8;
-        } else if (!isRed && rank > 2) {
-            bonus += (rank - 2) * 8;
+        int redGuardPos = Long.numberOfTrailingZeros(state.redGuard);
+        int blueGuardPos = Long.numberOfTrailingZeros(state.blueGuard);
+
+        int rankDiff = Math.abs(GameState.rank(redGuardPos) - GameState.rank(blueGuardPos));
+        int fileDiff = Math.abs(GameState.file(redGuardPos) - GameState.file(blueGuardPos));
+
+        // Direct opposition bonus
+        if (rankDiff == 2 && fileDiff == 0 || rankDiff == 0 && fileDiff == 2) {
+            return state.redToMove ? -50 : 50; // Opponent has opposition
         }
 
-        // Central control bonus
-        if (isCentralSquare(square)) {
-            bonus += CENTRAL_BONUS;
-        }
-
-        // D-file preference
-        if (file == 3) {
-            bonus += 10;
-        }
-
-        return bonus;
+        return 0;
     }
 
-    // === GUARD EVALUATION - BALANCED ===
-    private int evaluateGuardAdvancementBasic(GameState state) {
-        int guardScore = 0;
+    /**
+     * Detect game phase using material count
+     */
+    private MaterialEval.GamePhase detectGamePhase(GameState state) {
+        int totalMaterial = materialEval.getTotalMaterial(state);
+        boolean guardsAdvanced = positionalEval.areGuardsAdvanced(state);
 
-        if (state.redGuard != 0) {
-            int guardPos = Long.numberOfTrailingZeros(state.redGuard);
-            int rank = GameState.rank(guardPos);
-            guardScore += (6 - rank) * GUARD_ADVANCEMENT_BONUS;
-        }
-
-        if (state.blueGuard != 0) {
-            int guardPos = Long.numberOfTrailingZeros(state.blueGuard);
-            int rank = GameState.rank(guardPos);
-            guardScore -= rank * GUARD_ADVANCEMENT_BONUS;
-        }
-
-        return guardScore;
-    }
-
-    private int evaluateGuardAdvancement(GameState state) {
-        int guardScore = 0;
-
-        // Red guard
-        if (state.redGuard != 0) {
-            guardScore += evaluateGuardAdvancementForSide(state, true);
-            guardScore += evaluateGuardSafety(state, true);
-        }
-
-        // Blue guard
-        if (state.blueGuard != 0) {
-            guardScore -= evaluateGuardAdvancementForSide(state, false);
-            guardScore -= evaluateGuardSafety(state, false);
-        }
-
-        return guardScore;
-    }
-
-    private int evaluateGuardAdvancementForSide(GameState state, boolean isRed) {
-        long guardBit = isRed ? state.redGuard : state.blueGuard;
-        if (guardBit == 0) return 0;
-
-        int guardPos = Long.numberOfTrailingZeros(guardBit);
-        int rank = GameState.rank(guardPos);
-        int file = GameState.file(guardPos);
-        int score = 0;
-
-        // Basic advancement
-        int advancement = isRed ? (6 - rank) : rank;
-        score += advancement * GUARD_ADVANCEMENT_BONUS;
-
-        // D-file preference
-        int fileDistance = Math.abs(file - 3);
-        score += Math.max(0, 3 - fileDistance) * 15;
-
-        // Distance to enemy castle
-        int targetCastle = isRed ? RED_CASTLE : BLUE_CASTLE;
-        int distance = calculateDistance(guardPos, targetCastle);
-        score += Math.max(0, 10 - distance) * 5;
-
-        return score;
-    }
-
-    private int evaluateGuardSafety(GameState state, boolean isRed) {
-        int safetyScore = 0;
-
-        if (isGuardInDanger(state, isRed)) {
-            safetyScore -= 150;
+        if (totalMaterial <= 6) {
+            return MaterialEval.GamePhase.ENDGAME;
+        } else if (totalMaterial <= 12 || guardsAdvanced) {
+            return MaterialEval.GamePhase.MIDDLEGAME;
         } else {
-            // Bonus for safe guards with escape routes
-            int escapeRoutes = countGuardEscapeRoutes(state, isRed);
-            safetyScore += Math.min(escapeRoutes * 20, 60);
-        }
-
-        return safetyScore;
-    }
-
-    // === TACTICAL EVALUATION - CONTROLLED ===
-    private int evaluateTacticalThreats(GameState state) {
-        int threatScore = 0;
-
-        try {
-            List<Move> moves = MoveGenerator.generateAllMoves(state);
-            for (Move move : moves.subList(0, Math.min(10, moves.size()))) { // Limit to avoid timeout
-                if (isCapture(move, state)) {
-                    int captureValue = getCaptureValue(move, state);
-                    threatScore += state.redToMove ? captureValue / 4 : -captureValue / 4;
-                }
-            }
-        } catch (Exception e) {
-            return 0;
-        }
-
-        return threatScore;
-    }
-
-    // === MOBILITY EVALUATION ===
-    private int evaluateMobility(GameState state) {
-        try {
-            List<Move> moves = MoveGenerator.generateAllMoves(state);
-            int mobilityBonus = Math.min(moves.size() * MOBILITY_BONUS / 2, 100); // Cap mobility bonus
-            return state.redToMove ? mobilityBonus : -mobilityBonus;
-        } catch (Exception e) {
-            return 0;
+            return MaterialEval.GamePhase.OPENING;
         }
     }
 
-    // === POSITIONAL FACTORS ===
-    private int evaluatePositionalFactors(GameState state) {
-        int positionalScore = 0;
-
-        // Central control
-        for (int square : CENTRAL_SQUARES) {
-            int control = evaluateSquareControl(state, square);
-            positionalScore += control * 5;
-        }
-
-        // Piece coordination
-        positionalScore += evaluatePieceCoordination(state);
-
-        return positionalScore;
+    /**
+     * Get phase-specific weights
+     */
+    private double[] getPhaseWeights(MaterialEval.GamePhase phase) {
+        return switch (phase) {
+            case OPENING -> Weights.OPENING;
+            case MIDDLEGAME -> Weights.MIDDLEGAME;
+            case ENDGAME, TABLEBASE -> Weights.ENDGAME;
+        };
     }
 
-    private int evaluateSquareControl(GameState state, int square) {
-        int redControl = 0, blueControl = 0;
+    // === PUBLIC UTILITY METHODS ===
 
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            if (state.redStackHeights[i] > 0) {
-                if (canInfluenceSquare(i, square, state.redStackHeights[i])) {
-                    redControl += 1;
-                }
-            }
-            if (state.blueStackHeights[i] > 0) {
-                if (canInfluenceSquare(i, square, state.blueStackHeights[i])) {
-                    blueControl += 1;
-                }
-            }
-        }
-
-        return redControl - blueControl;
-    }
-
-    private int evaluatePieceCoordination(GameState state) {
-        int coordinationScore = 0;
-
-        // Count adjacent pieces
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            if (state.redStackHeights[i] > 0) {
-                coordinationScore += countAdjacentFriendly(state, i, true) * COORDINATION_BONUS;
-            }
-            if (state.blueStackHeights[i] > 0) {
-                coordinationScore -= countAdjacentFriendly(state, i, false) * COORDINATION_BONUS;
-            }
-        }
-
-        return coordinationScore;
-    }
-
-    // === HELPER METHODS ===
-
-    private int calculateDistance(int from, int to) {
-        int fromRank = GameState.rank(from);
-        int fromFile = GameState.file(from);
-        int toRank = GameState.rank(to);
-        int toFile = GameState.file(to);
-        return Math.abs(fromRank - toRank) + Math.abs(fromFile - toFile);
-    }
-
-    private boolean canInfluenceSquare(int from, int to, int range) {
-        int rankDiff = Math.abs(GameState.rank(from) - GameState.rank(to));
-        int fileDiff = Math.abs(GameState.file(from) - GameState.file(to));
-        if (rankDiff != 0 && fileDiff != 0) return false;
-        return Math.max(rankDiff, fileDiff) <= range;
-    }
-
+    /**
+     * Check if a guard is in danger (public for other components)
+     */
     public boolean isGuardInDanger(GameState state, boolean checkRed) {
-        if (state == null) return false;
-        long guardBit = checkRed ? state.redGuard : state.blueGuard;
-        if (guardBit == 0) return false;
-
-        int guardPos = Long.numberOfTrailingZeros(guardBit);
-        long enemyPieces = checkRed ? (state.blueTowers | state.blueGuard) : (state.redTowers | state.redGuard);
-
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            if ((enemyPieces & GameState.bit(i)) != 0) {
-                int height = checkRed ? state.blueStackHeights[i] : state.redStackHeights[i];
-                if (height == 0 && (enemyPieces & GameState.bit(i)) != 0) height = 1; // Guard
-                if (canAttackSquare(i, guardPos, height)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return safetyEval.isGuardInDanger(state, checkRed);
     }
 
-    private boolean canAttackSquare(int from, int to, int range) {
-        if (range <= 0) return false;
-        int rankDiff = Math.abs(GameState.rank(from) - GameState.rank(to));
-        int fileDiff = Math.abs(GameState.file(from) - GameState.file(to));
-        if (rankDiff != 0 && fileDiff != 0) return false;
-        int distance = Math.max(rankDiff, fileDiff);
-        return distance <= range;
+    /**
+     * Check if guards are in danger (for quiescence)
+     */
+    public boolean areGuardsInDanger(GameState state) {
+        return safetyEval.areGuardsInDanger(state);
     }
 
-    private int countGuardEscapeRoutes(GameState state, boolean isRed) {
-        long guardBit = isRed ? state.redGuard : state.blueGuard;
-        if (guardBit == 0) return 0;
-
-        int guardPos = Long.numberOfTrailingZeros(guardBit);
-        int escapeRoutes = 0;
-        int[] directions = {-1, 1, -7, 7};
-
-        for (int dir : directions) {
-            int target = guardPos + dir;
-            if (GameState.isOnBoard(target) && !isRankWrap(guardPos, target, dir)) {
-                if (!isOccupiedByFriendly(target, state, isRed)) {
-                    escapeRoutes++;
-                }
-            }
-        }
-        return escapeRoutes;
+    /**
+     * Get material count for a side
+     */
+    public int getMaterialCount(GameState state, boolean isRed) {
+        return materialEval.getTotalMaterial(state, isRed);
     }
 
-    private int countAdjacentFriendly(GameState state, int square, boolean isRed) {
-        int count = 0;
-        int[] directions = {-1, 1, -7, 7};
-
-        for (int dir : directions) {
-            int adjacent = square + dir;
-            if (!GameState.isOnBoard(adjacent)) continue;
-            if (isRankWrap(square, adjacent, dir)) continue;
-
-            long adjBit = GameState.bit(adjacent);
-            if (isRed && ((state.redTowers | state.redGuard) & adjBit) != 0) {
-                count++;
-            } else if (!isRed && ((state.blueTowers | state.blueGuard) & adjBit) != 0) {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private boolean isCapture(Move move, GameState state) {
-        long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
-    }
-
-    private int getCaptureValue(Move move, GameState state) {
-        long toBit = GameState.bit(move.to);
-        boolean isRed = state.redToMove;
-
-        if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
-            return 800; // Reduced from 1500
-        }
-
-        int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
-        return height * 80; // Reduced from 100
-    }
-
-    private boolean isCentralSquare(int square) {
-        for (int central : CENTRAL_SQUARES) {
-            if (square == central) return true;
-        }
-        return false;
-    }
-
-    private boolean isOccupiedByFriendly(int square, GameState state, boolean isRed) {
-        long bit = GameState.bit(square);
-        if (isRed) {
-            return (state.redGuard & bit) != 0 || (state.redTowers & bit) != 0;
-        } else {
-            return (state.blueGuard & bit) != 0 || (state.blueTowers & bit) != 0;
-        }
-    }
-
-    private boolean isRankWrap(int from, int to, int direction) {
-        if (Math.abs(direction) == 1) {
-            return GameState.rank(from) != GameState.rank(to);
-        }
-        return false;
+    /**
+     * Get total material on board
+     */
+    public int getTotalMaterial(GameState state) {
+        return materialEval.getTotalMaterial(state);
     }
 
     // === TIME MANAGEMENT ===
+
     public static void setRemainingTime(long timeMs) {
         remainingTimeMs = Math.max(0, timeMs);
         emergencyMode = timeMs < 1000;
@@ -479,5 +312,34 @@ public class Evaluator {
 
     public static boolean isEmergencyMode() {
         return emergencyMode;
+    }
+
+    // === PARAMETER TUNING SUPPORT ===
+
+    /**
+     * Get current evaluation weights (for tuning)
+     */
+    public double[] getWeights() {
+        return new double[] {
+                Weights.MATERIAL, Weights.POSITIONAL,
+                Weights.SAFETY, Weights.TACTICAL
+        };
+    }
+
+    /**
+     * Evaluate with custom weights (for parameter tuning)
+     */
+    public int evaluateWithWeights(GameState state, double[] weights) {
+        if (weights.length != 4) {
+            throw new IllegalArgumentException("Need 4 weights: material, positional, safety, tactical");
+        }
+
+        int eval = 0;
+        eval += (int)(materialEval.evaluateMaterialWithActivity(state) * weights[0]);
+        eval += (int)(positionalEval.evaluatePositional(state) * weights[1]);
+        eval += (int)(safetyEval.evaluateGuardSafety(state) * weights[2]);
+        eval += (int)(evaluateBasicTactics(state) * weights[3]);
+
+        return eval;
     }
 }
