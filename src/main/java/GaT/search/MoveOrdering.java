@@ -425,7 +425,7 @@ public class MoveOrdering {
         killerMoves[depth][0] = move;
 
         // Update statistics
-        SearchStatistics.getInstance().incrementKillerMoveHits();
+        statistics.incrementKillerMoveHits();
     }
 
     /**

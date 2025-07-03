@@ -1,4 +1,3 @@
-// File: src/main/java/GaT/search/QuiescenceSearch.java
 package GaT.search;
 
 import GaT.model.GameState;
@@ -6,31 +5,33 @@ import GaT.evaluation.Evaluator;
 import GaT.search.strategy.QuiescenceStrategy;
 
 /**
- * Wrapper for QuiescenceStrategy to match expected API
+ * Instance-based Quiescence Search
+ * Now uses dependency injection instead of static state
  */
 public class QuiescenceSearch {
 
-    private static Evaluator evaluator;
+    private final Evaluator evaluator;
 
-    public static void setEvaluator(Evaluator eval) {
-        evaluator = eval;
+    public QuiescenceSearch(Evaluator evaluator) {
+        this.evaluator = evaluator;
     }
 
-    public static int quiesce(GameState state, int alpha, int beta,
-                              boolean maximizingPlayer, int qDepth) {
-        if (evaluator == null) {
-            throw new IllegalStateException("Evaluator not set in QuiescenceSearch");
-        }
+    // ✅ INSTANCE METHOD - can access injected evaluator
+    public int quiesce(GameState state, int alpha, int beta,
+                       boolean maximizingPlayer, int qDepth) {
         return QuiescenceStrategy.quiesce(state, alpha, beta, maximizingPlayer, qDepth, evaluator);
     }
 
-    // Delegate statistics methods
-    public static long qNodes = 0;
-    public static long qCutoffs = 0;
+    // ✅ INSTANCE METHODS for statistics - no more static state
+    public long getQNodes() {
+        return QuiescenceStrategy.qNodes;
+    }
 
-    public static void resetQuiescenceStats() {
+    public long getQCutoffs() {
+        return QuiescenceStrategy.qCutoffs;
+    }
+
+    public void resetQuiescenceStats() {
         QuiescenceStrategy.resetQuiescenceStats();
-        qNodes = QuiescenceStrategy.qNodes;
-        qCutoffs = QuiescenceStrategy.qCutoffs;
     }
 }

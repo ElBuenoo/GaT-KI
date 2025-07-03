@@ -5,7 +5,7 @@ import java.util.Map;
 
 /**
  * SEARCH STATISTICS - Centralized metrics tracking
- * Extracted from scattered counters in Minimax, QuiescenceSearch, etc.
+ * Now using dependency injection instead of singleton
  */
 public class SearchStatistics {
 
@@ -53,22 +53,12 @@ public class SearchStatistics {
     private int totalMovesGenerated = 0;
     private int totalMovesSearched = 0;
 
-    // === SINGLETON PATTERN ===
-    private static SearchStatistics instance = new SearchStatistics();
-
-    public static SearchStatistics getInstance() {
-        return instance;
-    }
-
-    private SearchStatistics() {
+    // ✅ REMOVED SINGLETON PATTERN - now use normal constructor
+    public SearchStatistics() {
         reset();
     }
 
     // === RESET AND INITIALIZATION ===
-
-    /**
-     * Reset all statistics for a new search
-     */
     public void reset() {
         nodeCount = 0;
         qNodeCount = 0;
@@ -108,34 +98,22 @@ public class SearchStatistics {
         totalMovesSearched = 0;
     }
 
-    /**
-     * Start timing a search
-     */
     public void startSearch() {
         searchStartTime = System.currentTimeMillis();
     }
 
-    /**
-     * End timing a search
-     */
     public void endSearch() {
         if (searchStartTime > 0) {
             totalSearchTime = System.currentTimeMillis() - searchStartTime;
         }
     }
 
-    /**
-     * Start timing a depth iteration
-     */
     public void startDepth(int depth) {
         if (depth < depthTimes.length) {
             depthTimes[depth] = System.currentTimeMillis();
         }
     }
 
-    /**
-     * End timing a depth iteration
-     */
     public void endDepth(int depth) {
         if (depth < depthTimes.length && depthTimes[depth] > 0) {
             depthTimes[depth] = System.currentTimeMillis() - depthTimes[depth];
@@ -145,21 +123,18 @@ public class SearchStatistics {
     }
 
     // === NODE COUNTING ===
-
     public void incrementNodeCount() { nodeCount++; }
     public void incrementQNodeCount() { qNodeCount++; }
     public void incrementLeafNodeCount() { leafNodeCount++; }
     public void addBranchingFactor(int branches) { branchingFactor += branches; }
 
     // === TRANSPOSITION TABLE ===
-
     public void incrementTTHits() { ttHits++; }
     public void incrementTTMisses() { ttMisses++; }
     public void incrementTTStores() { ttStores++; }
     public void incrementTTCollisions() { ttCollisions++; }
 
     // === PRUNING ===
-
     public void incrementAlphaBetaCutoffs() { alphaBetaCutoffs++; }
     public void incrementReverseFutilityCutoffs() { reverseFutilityCutoffs++; }
     public void incrementNullMoveCutoffs() { nullMoveCutoffs++; }
@@ -168,21 +143,18 @@ public class SearchStatistics {
     public void incrementCheckExtensions() { checkExtensions++; }
 
     // === QUIESCENCE ===
-
     public void incrementQCutoffs() { qCutoffs++; }
     public void incrementStandPatCutoffs() { standPatCutoffs++; }
     public void incrementDeltaPruningCutoffs() { deltaPruningCutoffs++; }
     public void incrementQTTHits() { qTTHits++; }
 
     // === MOVE ORDERING ===
-
     public void incrementKillerMoveHits() { killerMoveHits++; }
     public void incrementHistoryMoveHits() { historyMoveHits++; }
     public void incrementTTMoveHits() { ttMoveHits++; }
     public void incrementCaptureOrderingHits() { captureOrderingHits++; }
 
     // === MOVE TRACKING ===
-
     public void recordMove(String move) {
         moveFrequency.merge(move, 1, Integer::sum);
     }
@@ -196,7 +168,6 @@ public class SearchStatistics {
     }
 
     // === GETTERS ===
-
     public long getNodeCount() { return nodeCount; }
     public long getQNodeCount() { return qNodeCount; }
     public long getLeafNodeCount() { return leafNodeCount; }
@@ -231,22 +202,15 @@ public class SearchStatistics {
     public int getIterationsCompleted() { return iterationsCompleted; }
 
     // === ANALYSIS METHODS ===
-
-    /**
-     * Get search efficiency score (0-100)
-     */
     public double getSearchEfficiency() {
-        double ttEfficiency = getTTHitRate() * 20;           // 0-20 points
-        double cutoffEfficiency = getCutoffRate() * 30;      // 0-30 points
-        double branchingEfficiency = Math.max(0, 25 - getAverageBranchingFactor()); // 0-25 points
-        double speedEfficiency = Math.min(25, getNodesPerSecond() / 10000); // 0-25 points
+        double ttEfficiency = getTTHitRate() * 20;
+        double cutoffEfficiency = getCutoffRate() * 30;
+        double branchingEfficiency = Math.max(0, 25 - getAverageBranchingFactor());
+        double speedEfficiency = Math.min(25, getNodesPerSecond() / 10000);
 
         return Math.min(100, ttEfficiency + cutoffEfficiency + branchingEfficiency + speedEfficiency);
     }
 
-    /**
-     * Get most frequently searched moves
-     */
     public Map<String, Integer> getTopMoves(int limit) {
         return moveFrequency.entrySet()
                 .stream()
@@ -258,26 +222,19 @@ public class SearchStatistics {
     }
 
     // === FORMATTED OUTPUT ===
-
-    /**
-     * Get comprehensive statistics summary
-     */
     public String getSummary() {
         StringBuilder sb = new StringBuilder();
         sb.append("=== SEARCH STATISTICS ===\n");
 
-        // Core stats
         sb.append(String.format("Nodes: %,d (%.1fk NPS)\n",
                 getTotalNodes(), getNodesPerSecond() / 1000));
         sb.append(String.format("  Regular: %,d, Quiescence: %,d\n", nodeCount, qNodeCount));
         sb.append(String.format("Max Depth: %d, Iterations: %d\n", maxDepthReached, iterationsCompleted));
         sb.append(String.format("Time: %,dms\n", totalSearchTime));
 
-        // Transposition Table
         sb.append(String.format("\nTT: %.1f%% hit rate (%,d hits, %,d misses)\n",
                 getTTHitRate() * 100, ttHits, ttMisses));
 
-        // Pruning effectiveness
         sb.append(String.format("\nPruning: %.1f%% cutoff rate\n", getCutoffRate() * 100));
         if (reverseFutilityCutoffs > 0) {
             sb.append(String.format("  RFP: %,d (%.1f%%)\n",
@@ -292,7 +249,6 @@ public class SearchStatistics {
                     futilityCutoffs, 100.0 * futilityCutoffs / nodeCount));
         }
 
-        // Quiescence stats
         if (qNodeCount > 0) {
             sb.append(String.format("\nQuiescence:\n"));
             sb.append(String.format("  Stand-pat: %,d (%.1f%%)\n",
@@ -301,7 +257,6 @@ public class SearchStatistics {
                     deltaPruningCutoffs, 100.0 * deltaPruningCutoffs / qNodeCount));
         }
 
-        // Move ordering
         long totalOrderingHits = ttMoveHits + killerMoveHits + historyMoveHits + captureOrderingHits;
         if (totalOrderingHits > 0) {
             sb.append(String.format("\nMove Ordering: %,d hits\n", totalOrderingHits));
@@ -311,24 +266,17 @@ public class SearchStatistics {
             if (historyMoveHits > 0) sb.append(String.format("  History: %,d\n", historyMoveHits));
         }
 
-        // Overall efficiency
         sb.append(String.format("\nEfficiency Score: %.1f/100\n", getSearchEfficiency()));
 
         return sb.toString();
     }
 
-    /**
-     * Get brief one-line summary
-     */
     public String getBriefSummary() {
         return String.format("Nodes: %,d, Time: %,dms, NPS: %.1fk, TT: %.1f%%, Cuts: %.1f%%, Eff: %.1f",
                 getTotalNodes(), totalSearchTime, getNodesPerSecond() / 1000,
                 getTTHitRate() * 100, getCutoffRate() * 100, getSearchEfficiency());
     }
 
-    /**
-     * Export statistics as CSV for analysis
-     */
     public String toCSV() {
         return String.format("%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.1f\n",
                 nodeCount, qNodeCount, maxDepthReached, totalSearchTime,
@@ -336,9 +284,6 @@ public class SearchStatistics {
                 getAverageBranchingFactor(), getSearchEfficiency());
     }
 
-    /**
-     * Get CSV header for export
-     */
     public static String getCSVHeader() {
         return "nodes,qnodes,depth,time_ms,tt_probes,tt_hit_rate,cutoff_rate,branching_factor,efficiency\n";
     }
