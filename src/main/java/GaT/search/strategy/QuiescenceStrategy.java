@@ -1,4 +1,3 @@
-// File: src/main/java/GaT/search/strategy/QuiescenceStrategy.java
 package GaT.search.strategy;
 
 import GaT.model.*;
@@ -9,35 +8,26 @@ import java.util.*;
 
 public class QuiescenceStrategy {
 
-    // Statistics
-    public static long qNodes = 0;
-    public static long qCutoffs = 0;
-    public static long standPatCutoffs = 0;
-
     private static final int MAX_Q_DEPTH = 12;
 
     /**
-     * Static quiescence search - needs evaluator reference
+     * ✅ UPDATED: Now takes SearchStatistics as parameter
      */
     public static int quiesce(GameState state, int alpha, int beta,
                               boolean maximizingPlayer, int qDepth,
-                              Evaluator evaluator) {  // Pass evaluator as parameter
-        qNodes++;
-        SearchStatistics.getInstance().incrementQNodeCount();
+                              Evaluator evaluator, SearchStatistics statistics) {
+
+        statistics.incrementQNodeCount(); // ✅ Use injected statistics
 
         if (qDepth >= MAX_Q_DEPTH) {
             return evaluator.evaluate(state, -qDepth);
         }
 
-        // Stand pat evaluation - use passed evaluator
         int standPat = evaluator.evaluate(state, -qDepth);
-
-        // Rest of the implementation...
-        // Replace all Minimax.evaluate() calls with evaluator.evaluate()
 
         if (maximizingPlayer) {
             if (standPat >= beta) {
-                standPatCutoffs++;
+                statistics.incrementStandPatCutoffs(); // ✅ Use injected statistics
                 return beta;
             }
             alpha = Math.max(alpha, standPat);
@@ -52,20 +42,19 @@ public class QuiescenceStrategy {
                 GameState copy = state.copy();
                 copy.applyMove(move);
 
-                int eval = quiesce(copy, alpha, beta, false, qDepth + 1, evaluator);
+                int eval = quiesce(copy, alpha, beta, false, qDepth + 1, evaluator, statistics);
                 maxEval = Math.max(maxEval, eval);
                 alpha = Math.max(alpha, eval);
 
                 if (beta <= alpha) {
-                    qCutoffs++;
+                    statistics.incrementQCutoffs(); // ✅ Use injected statistics
                     break;
                 }
             }
             return maxEval;
         } else {
-            // Similar for minimizing player...
             if (standPat <= alpha) {
-                standPatCutoffs++;
+                statistics.incrementStandPatCutoffs(); // ✅ Use injected statistics
                 return alpha;
             }
             beta = Math.min(beta, standPat);
@@ -80,12 +69,12 @@ public class QuiescenceStrategy {
                 GameState copy = state.copy();
                 copy.applyMove(move);
 
-                int eval = quiesce(copy, alpha, beta, true, qDepth + 1, evaluator);
+                int eval = quiesce(copy, alpha, beta, true, qDepth + 1, evaluator, statistics);
                 minEval = Math.min(minEval, eval);
                 beta = Math.min(beta, eval);
 
                 if (beta <= alpha) {
-                    qCutoffs++;
+                    statistics.incrementQCutoffs(); // ✅ Use injected statistics
                     break;
                 }
             }
@@ -93,6 +82,7 @@ public class QuiescenceStrategy {
         }
     }
 
+    // ✅ KEEP THESE HELPER METHODS (they're fine)
     private static List<Move> generateTacticalMoves(GameState state) {
         List<Move> allMoves = MoveGenerator.generateAllMoves(state);
         List<Move> tacticalMoves = new ArrayList<>();
@@ -102,20 +92,16 @@ public class QuiescenceStrategy {
                 tacticalMoves.add(move);
             }
         }
-
         return tacticalMoves;
     }
 
     private static boolean isTacticalMove(Move move, GameState state) {
-        // Use GameRules instead of Minimax
         if (GameRules.isCapture(move, state)) {
             return true;
         }
-
         if (isWinningGuardMove(move, state)) {
             return true;
         }
-
         return false;
     }
 
@@ -127,9 +113,5 @@ public class QuiescenceStrategy {
         return move.to == targetCastle;
     }
 
-    public static void resetQuiescenceStats() {
-        qNodes = 0;
-        qCutoffs = 0;
-        standPatCutoffs = 0;
-    }
+    // ✅ NO MORE STATIC STATISTICS - they're handled by SearchStatistics now
 }

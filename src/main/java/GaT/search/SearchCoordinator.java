@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.function.BooleanSupplier;
 
 /**
- * Coordinates all search operations - replaces static Minimax methods
+ * Coordinates all search operations - now with proper dependency injection
  */
 public class SearchCoordinator {
     private final Map<SearchConfig.SearchStrategy, ISearchStrategy> strategies;
@@ -16,26 +16,30 @@ public class SearchCoordinator {
     private final TranspositionTable transpositionTable;
     private final MoveOrdering moveOrdering;
     private final SearchStatistics statistics;
+    private final QuiescenceSearch quiescenceSearch;
 
     // Timeout support
     private BooleanSupplier timeoutChecker = null;
 
-    public SearchCoordinator() {
-        this.evaluator = new Evaluator();
-        this.transpositionTable = new TranspositionTable(SearchConfig.TT_SIZE);
-        this.moveOrdering = new MoveOrdering();
-        this.statistics = SearchStatistics.getInstance();
+    // ✅ CONSTRUCTOR INJECTION - all dependencies injected properly
+    public SearchCoordinator(Evaluator evaluator, TranspositionTable transpositionTable,
+                             MoveOrdering moveOrdering, SearchStatistics statistics) {
+        this.evaluator = evaluator;
+        this.transpositionTable = transpositionTable;
+        this.moveOrdering = moveOrdering;
+        this.statistics = statistics;
+        this.quiescenceSearch = new QuiescenceSearch(evaluator, statistics);
 
-        // Register strategies
+        // ✅ CREATE STRATEGIES WITH ALL DEPENDENCIES
         this.strategies = new HashMap<>();
         this.strategies.put(SearchConfig.SearchStrategy.ALPHA_BETA,
-                new AlphaBetaStrategy());
+                new AlphaBetaStrategy(statistics, quiescenceSearch, evaluator));
         this.strategies.put(SearchConfig.SearchStrategy.ALPHA_BETA_Q,
-                new AlphaBetaWithQuiescenceStrategy());
+                new AlphaBetaWithQuiescenceStrategy(statistics, quiescenceSearch, evaluator));
         this.strategies.put(SearchConfig.SearchStrategy.PVS,
-                new PVSStrategy());
+                new PVSStrategy(statistics, quiescenceSearch, evaluator));
         this.strategies.put(SearchConfig.SearchStrategy.PVS_Q,
-                new PVSWithQuiescenceStrategy());
+                new PVSWithQuiescenceStrategy(statistics, quiescenceSearch, evaluator));
     }
 
     /**
@@ -72,7 +76,6 @@ public class SearchCoordinator {
 
             statistics.endSearch();
 
-            // Debug output
             System.out.println("Search completed: " + strategy.getName());
             System.out.println("Nodes: " + result.nodesSearched);
             System.out.println("Time: " + result.timeMs + "ms");
@@ -86,7 +89,6 @@ public class SearchCoordinator {
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("timeout")) {
                 System.out.println("Search timeout - returning best so far");
-                // Could implement getting best move so far from TT
                 return null;
             }
             throw e;
@@ -108,7 +110,6 @@ public class SearchCoordinator {
     }
 
     // === Timeout management ===
-
     public void setTimeoutChecker(BooleanSupplier checker) {
         this.timeoutChecker = checker;
     }
@@ -118,7 +119,6 @@ public class SearchCoordinator {
     }
 
     // === Component access ===
-
     public void clearTranspositionTable() {
         transpositionTable.clear();
     }

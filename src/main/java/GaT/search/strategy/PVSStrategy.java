@@ -2,14 +2,29 @@ package GaT.search.strategy;
 
 import GaT.model.*;
 import GaT.search.MoveGenerator;
+import GaT.search.SearchStatistics;
+import GaT.search.QuiescenceSearch;
+import GaT.evaluation.Evaluator;
 import java.util.List;
 
 /**
- * Principal Variation Search implementation
+ * Principal Variation Search implementation with dependency injection
  */
 public class PVSStrategy implements ISearchStrategy {
 
+    // ✅ INJECTED DEPENDENCIES
+    protected final SearchStatistics statistics;
+    protected final QuiescenceSearch quiescenceSearch;
+    protected final Evaluator evaluator;
+
     private static final int ASPIRATION_WINDOW = 50;
+
+    // ✅ CONSTRUCTOR INJECTION
+    public PVSStrategy(SearchStatistics statistics, QuiescenceSearch quiescenceSearch, Evaluator evaluator) {
+        this.statistics = statistics;
+        this.quiescenceSearch = quiescenceSearch;
+        this.evaluator = evaluator;
+    }
 
     @Override
     public SearchResult search(SearchContext context) {
@@ -33,7 +48,7 @@ public class PVSStrategy implements ISearchStrategy {
         } catch (AspirationFailException e) {
             // Re-search with full window
             System.out.println("Aspiration fail - researching with full window");
-            context.statistics.reset(); // Reset stats for clean search
+            statistics.reset(); // ✅ Use injected instance
             return performPVS(context, startTime);
         }
     }
@@ -41,8 +56,8 @@ public class PVSStrategy implements ISearchStrategy {
     private SearchResult performPVS(SearchContext context, long startTime) {
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
         if (moves.isEmpty()) {
-            int score = context.evaluator.evaluate(context.state, 0);
-            return new SearchResult(null, score, 0, context.statistics.getNodeCount());
+            int score = evaluator.evaluate(context.state, 0); // ✅ Use injected instance
+            return new SearchResult(null, score, 0, statistics.getNodeCount()); // ✅ Use injected instance
         }
 
         // Order moves
@@ -89,7 +104,7 @@ public class PVSStrategy implements ISearchStrategy {
             alpha = Math.max(alpha, score);
 
             if (alpha >= beta) {
-                context.statistics.incrementAlphaBetaCutoffs();
+                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
                 break;
             }
         }
@@ -104,11 +119,11 @@ public class PVSStrategy implements ISearchStrategy {
 
         long timeMs = System.currentTimeMillis() - startTime;
         return new SearchResult(bestMove, bestScore, context.depth,
-                context.statistics.getNodeCount(), timeMs, false);
+                statistics.getNodeCount(), timeMs, false); // ✅ Use injected instance
     }
 
     protected int pvSearch(SearchContext context, boolean isPVNode) {
-        context.statistics.incrementNodeCount();
+        statistics.incrementNodeCount(); // ✅ Use injected instance
 
         // Timeout check
         if (context.timeoutChecker.getAsBoolean()) {
@@ -117,15 +132,15 @@ public class PVSStrategy implements ISearchStrategy {
 
         // Terminal node
         if (context.depth <= 0 || GameRules.isGameOver(context.state)) {
-            context.statistics.incrementLeafNodeCount();
-            return context.evaluator.evaluate(context.state, context.depth);
+            statistics.incrementLeafNodeCount(); // ✅ Use injected instance
+            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
         }
 
         // TT probe
         long hash = context.state.hash();
         TTEntry entry = context.ttable.get(hash);
         if (entry != null && entry.depth >= context.depth) {
-            context.statistics.incrementTTHits();
+            statistics.incrementTTHits(); // ✅ Use injected instance
 
             if (entry.flag == TTEntry.EXACT && (!isPVNode || context.depth <= 2)) {
                 return entry.score;
@@ -140,15 +155,15 @@ public class PVSStrategy implements ISearchStrategy {
                 }
             }
         } else {
-            context.statistics.incrementTTMisses();
+            statistics.incrementTTMisses(); // ✅ Use injected instance
         }
 
         // Move generation
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
-        context.statistics.addMovesGenerated(moves.size());
+        statistics.addMovesGenerated(moves.size()); // ✅ Use injected instance
 
         if (moves.isEmpty()) {
-            return context.evaluator.evaluate(context.state, context.depth);
+            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
         }
 
         context.moveOrdering.orderMoves(moves, context.state, context.depth, entry);
@@ -161,7 +176,7 @@ public class PVSStrategy implements ISearchStrategy {
         for (Move move : moves) {
             GameState newState = context.state.copy();
             newState.applyMove(move);
-            context.statistics.addMovesSearched(1);
+            statistics.addMovesSearched(1); // ✅ Use injected instance
 
             int score;
 
@@ -191,7 +206,7 @@ public class PVSStrategy implements ISearchStrategy {
             alpha = Math.max(alpha, score);
 
             if (alpha >= context.beta) {
-                context.statistics.incrementAlphaBetaCutoffs();
+                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
                 if (!GameRules.isCapture(move, context.state)) {
                     context.moveOrdering.storeKillerMove(move, context.depth);
                 }
@@ -217,7 +232,7 @@ public class PVSStrategy implements ISearchStrategy {
         }
 
         context.ttable.put(hash, new TTEntry(score, context.depth, flag, bestMove));
-        context.statistics.incrementTTStores();
+        statistics.incrementTTStores(); // ✅ Use injected instance
     }
 
     @Override

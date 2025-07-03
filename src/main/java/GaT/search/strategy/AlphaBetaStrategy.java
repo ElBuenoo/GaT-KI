@@ -2,12 +2,27 @@ package GaT.search.strategy;
 
 import GaT.model.*;
 import GaT.search.MoveGenerator;
+import GaT.search.SearchStatistics;
+import GaT.search.QuiescenceSearch;
+import GaT.evaluation.Evaluator;
 import java.util.List;
 
 /**
- * Standard Alpha-Beta search implementation
+ * Standard Alpha-Beta search implementation with dependency injection
  */
 public class AlphaBetaStrategy implements ISearchStrategy {
+
+    // ✅ INJECTED DEPENDENCIES
+    protected final SearchStatistics statistics;
+    protected final QuiescenceSearch quiescenceSearch;
+    protected final Evaluator evaluator;
+
+    // ✅ CONSTRUCTOR INJECTION
+    public AlphaBetaStrategy(SearchStatistics statistics, QuiescenceSearch quiescenceSearch, Evaluator evaluator) {
+        this.statistics = statistics;
+        this.quiescenceSearch = quiescenceSearch;
+        this.evaluator = evaluator;
+    }
 
     @Override
     public SearchResult search(SearchContext context) {
@@ -15,8 +30,8 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
         if (moves.isEmpty()) {
-            int score = context.evaluator.evaluate(context.state, 0);
-            return new SearchResult(null, score, 0, context.statistics.getNodeCount());
+            int score = evaluator.evaluate(context.state, 0); // ✅ Use injected instance
+            return new SearchResult(null, score, 0, statistics.getNodeCount()); // ✅ Use injected instance
         }
 
         // Order moves
@@ -54,7 +69,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             }
 
             if (beta <= alpha) {
-                context.statistics.incrementAlphaBetaCutoffs();
+                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
                 break;
             }
         }
@@ -64,11 +79,11 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         long timeMs = System.currentTimeMillis() - startTime;
         return new SearchResult(bestMove, bestScore, context.depth,
-                context.statistics.getNodeCount(), timeMs, false);
+                statistics.getNodeCount(), timeMs, false); // ✅ Use injected instance
     }
 
     protected int alphaBeta(SearchContext context) {
-        context.statistics.incrementNodeCount();
+        statistics.incrementNodeCount(); // ✅ Use injected instance
 
         // Check timeout
         if (context.timeoutChecker.getAsBoolean()) {
@@ -77,15 +92,15 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         // Terminal node check
         if (context.depth <= 0 || GameRules.isGameOver(context.state)) {
-            context.statistics.incrementLeafNodeCount();
-            return context.evaluator.evaluate(context.state, context.depth);
+            statistics.incrementLeafNodeCount(); // ✅ Use injected instance
+            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
         }
 
         // TT lookup
         long hash = context.state.hash();
         TTEntry entry = context.ttable.get(hash);
         if (entry != null && entry.depth >= context.depth) {
-            context.statistics.incrementTTHits();
+            statistics.incrementTTHits(); // ✅ Use injected instance
             if (entry.flag == TTEntry.EXACT) {
                 return entry.score;
             } else if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= context.beta) {
@@ -94,15 +109,15 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                 return entry.score;
             }
         } else {
-            context.statistics.incrementTTMisses();
+            statistics.incrementTTMisses(); // ✅ Use injected instance
         }
 
         // Generate moves
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
-        context.statistics.addMovesGenerated(moves.size());
+        statistics.addMovesGenerated(moves.size()); // ✅ Use injected instance
 
         if (moves.isEmpty()) {
-            return context.evaluator.evaluate(context.state, context.depth);
+            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
         }
 
         // Order moves
@@ -119,7 +134,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             GameState newState = context.state.copy();
             newState.applyMove(move);
 
-            context.statistics.addMovesSearched(1);
+            statistics.addMovesSearched(1); // ✅ Use injected instance
 
             // Apply reductions/extensions
             int newDepth = context.depth - 1;
@@ -127,7 +142,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             // Check extension
             if (GameRules.isInCheck(newState)) {
                 newDepth++;
-                context.statistics.incrementCheckExtensions();
+                statistics.incrementCheckExtensions(); // ✅ Use injected instance
             }
 
             // LMR for late moves
@@ -143,7 +158,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                             .withWindow(-beta, -alpha);
                     score = -alphaBeta(fullContext);
                 }
-                context.statistics.incrementLMRReductions();
+                statistics.incrementLMRReductions(); // ✅ Use injected instance
             } else {
                 // Normal search
                 SearchContext childContext = context.withNewState(newState, newDepth)
@@ -159,7 +174,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             alpha = Math.max(alpha, bestScore);
 
             if (alpha >= beta) {
-                context.statistics.incrementAlphaBetaCutoffs();
+                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
 
                 // Update killer moves
                 if (!GameRules.isCapture(move, context.state)) {
@@ -188,7 +203,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         TTEntry entry = new TTEntry(score, context.depth, flag, bestMove);
         context.ttable.put(hash, entry);
-        context.statistics.incrementTTStores();
+        statistics.incrementTTStores(); // ✅ Use injected instance
     }
 
     @Override

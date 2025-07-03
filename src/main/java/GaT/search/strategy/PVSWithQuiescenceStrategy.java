@@ -1,16 +1,23 @@
 package GaT.search.strategy;
 
 import GaT.model.*;
+import GaT.search.SearchStatistics;
 import GaT.search.QuiescenceSearch;
+import GaT.evaluation.Evaluator;
 
 /**
- * PVS with Quiescence Search
+ * PVS with Quiescence Search - dependency injection version
  */
 public class PVSWithQuiescenceStrategy extends PVSStrategy {
 
+    // ✅ CONSTRUCTOR INJECTION - calls parent constructor
+    public PVSWithQuiescenceStrategy(SearchStatistics statistics, QuiescenceSearch quiescenceSearch, Evaluator evaluator) {
+        super(statistics, quiescenceSearch, evaluator);
+    }
+
     @Override
     protected int pvSearch(SearchContext context, boolean isPVNode) {
-        context.statistics.incrementNodeCount();
+        statistics.incrementNodeCount(); // ✅ Use inherited field
 
         if (context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
@@ -18,8 +25,8 @@ public class PVSWithQuiescenceStrategy extends PVSStrategy {
 
         // At depth 0, use quiescence search
         if (context.depth <= 0) {
-            return QuiescenceSearch.quiesce(context.state, context.alpha, context.beta,
-                    context.maximizingPlayer, 0);
+            return quiescenceSearch.quiesce(context.state, context.alpha, context.beta,
+                    context.maximizingPlayer, 0); // ✅ Use inherited field
         }
 
         // Otherwise use normal PVS

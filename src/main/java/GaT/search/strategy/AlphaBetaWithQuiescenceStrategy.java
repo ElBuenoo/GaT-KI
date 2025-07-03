@@ -1,12 +1,19 @@
 package GaT.search.strategy;
 
 import GaT.model.*;
+import GaT.search.SearchStatistics;
 import GaT.search.QuiescenceSearch;
+import GaT.evaluation.Evaluator;
 
 /**
- * Alpha-Beta with Quiescence Search
+ * Alpha-Beta with Quiescence Search - dependency injection version
  */
 public class AlphaBetaWithQuiescenceStrategy extends AlphaBetaStrategy {
+
+    // ✅ CONSTRUCTOR INJECTION - calls parent constructor
+    public AlphaBetaWithQuiescenceStrategy(SearchStatistics statistics, QuiescenceSearch quiescenceSearch, Evaluator evaluator) {
+        super(statistics, quiescenceSearch, evaluator);
+    }
 
     @Override
     public SearchResult search(SearchContext context) {
@@ -16,7 +23,7 @@ public class AlphaBetaWithQuiescenceStrategy extends AlphaBetaStrategy {
 
     @Override
     protected int alphaBeta(SearchContext context) {
-        context.statistics.incrementNodeCount();
+        statistics.incrementNodeCount(); // ✅ Use inherited field
 
         if (context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
@@ -24,8 +31,8 @@ public class AlphaBetaWithQuiescenceStrategy extends AlphaBetaStrategy {
 
         // At depth 0, use quiescence search instead of static eval
         if (context.depth <= 0) {
-            return QuiescenceSearch.quiesce(context.state, context.alpha, context.beta,
-                    context.maximizingPlayer, 0);
+            return this.quiescenceSearch.quiesce(context.state, context.alpha, context.beta,
+                    context.maximizingPlayer, 0); // ✅ Use inherited field
         }
 
         // Otherwise use normal alpha-beta
