@@ -2,6 +2,7 @@ package GaT.engine;
 
 import GaT.model.*;
 import GaT.search.*;
+import GaT.evaluation.Evaluator;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class TimedGameEngine {
     private final GameEngine gameEngine;
-    private final SearchCoordinator coordinator;
+    private final SearchEngine searchEngine; // Direct access for timeout control
     private final ExecutorService executor;
 
     // Search state
@@ -22,14 +23,27 @@ public class TimedGameEngine {
     private volatile int currentDepth = 0;
     private volatile long searchStartTime;
 
+    // ✅ CONSTRUCTOR with proper dependency injection
     public TimedGameEngine() {
+        // ✅ Create GameEngine (which handles its own dependencies correctly)
         this.gameEngine = new GameEngine();
-        this.coordinator = new SearchCoordinator();
+
+        // ✅ Get SearchEngine from GameEngine for direct timeout control
+        this.searchEngine = getSearchEngineFromGameEngine();
+
+        // Create thread pool for AI
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "TimedSearch");
             t.setDaemon(true);
             return t;
         });
+    }
+
+    // ✅ Alternative constructor for testing
+    public TimedGameEngine(GameEngine gameEngine) {
+        this.gameEngine = gameEngine;
+        this.searchEngine = getSearchEngineFromGameEngine();
+        this.executor = Executors.newSingleThreadExecutor();
     }
 
     /**
@@ -69,7 +83,7 @@ public class TimedGameEngine {
 
         // Setup timeout checker
         AtomicBoolean timeout = new AtomicBoolean(false);
-        coordinator.setTimeoutChecker(timeout::get);
+        setTimeoutChecker(timeout::get);
 
         // Submit iterative deepening task
         Future<Move> future = executor.submit(() -> {
@@ -92,7 +106,7 @@ public class TimedGameEngine {
             // If no move found yet, do emergency depth 1 search
             if (bestSoFar == null) {
                 System.out.println("🚨 Emergency search...");
-                coordinator.clearTimeoutChecker();
+                clearTimeoutChecker();
                 bestSoFar = gameEngine.findBestMove(state, 1, strategy);
             }
 
@@ -104,7 +118,7 @@ public class TimedGameEngine {
 
         } finally {
             searchActive.set(false);
-            coordinator.clearTimeoutChecker();
+            clearTimeoutChecker();
         }
     }
 
@@ -119,7 +133,7 @@ public class TimedGameEngine {
         // Always search depth 1
         currentDepth = 1;
         long depthStart = System.currentTimeMillis();
-        bestMove = coordinator.findBestMove(state, 1, strategy);
+        bestMove = gameEngine.findBestMove(state, 1, strategy);
         depthTimes[1] = System.currentTimeMillis() - depthStart;
         currentBestMove.set(bestMove);
 
@@ -148,7 +162,7 @@ public class TimedGameEngine {
             depthStart = System.currentTimeMillis();
 
             try {
-                Move depthMove = coordinator.findBestMove(state, depth, strategy);
+                Move depthMove = gameEngine.findBestMove(state, depth, strategy);
                 if (depthMove != null) {
                     bestMove = depthMove;
                     currentBestMove.set(bestMove);
@@ -158,7 +172,7 @@ public class TimedGameEngine {
                 System.out.println("Depth " + depth + ": " + depthTimes[depth] + "ms");
 
                 // Check for mate score
-                int score = coordinator.evaluate(state);
+                int score = gameEngine.evaluate(state);
                 if (Math.abs(score) > 10000) {
                     System.out.println("Mate found!");
                     break;
@@ -206,7 +220,61 @@ public class TimedGameEngine {
      * Get search statistics
      */
     public String getSearchStats() {
-        return coordinator.getStatistics().getSummary();
+        return gameEngine.getSearchStats();
+    }
+
+    /**
+     * Get statistics object
+     */
+    public SearchStatistics getStatistics() {
+        return gameEngine.getStatistics();
+    }
+
+    /**
+     * Clear caches
+     */
+    public void clearCaches() {
+        gameEngine.clearCaches();
+    }
+
+    /**
+     * Reset statistics
+     */
+    public void resetStatistics() {
+        gameEngine.resetStatistics();
+    }
+
+    /**
+     * Evaluate position
+     */
+    public int evaluate(GameState state) {
+        return gameEngine.evaluate(state);
+    }
+
+
+
+    /**
+     * Generate legal moves
+     */
+    public List<Move> generateMoves(GameState state) {
+        return MoveGenerator.generateAllMoves(state);
+    }
+
+    // ✅ TIMEOUT MANAGEMENT - simplified approach
+    private void setTimeoutChecker(java.util.function.BooleanSupplier checker) {
+        if (searchEngine != null) {
+            searchEngine.setTimeoutChecker(checker);
+        }
+    }
+
+    private void clearTimeoutChecker() {
+        if (searchEngine != null) {
+            searchEngine.clearTimeoutChecker();
+        }
+    }
+
+    private SearchEngine getSearchEngineFromGameEngine() {
+        return gameEngine.getSearchEngine(); // Jetzt verfügbar
     }
 
     /**
@@ -223,20 +291,7 @@ public class TimedGameEngine {
         }
     }
 
-    // === STATIC COMPATIBILITY METHODS (for easy migration) ===
 
-    @Deprecated
-    public static Move findBestMoveWithTime(GameState state, int maxDepth, long timeMillis) {
-        TimedGameEngine engine = new TimedGameEngine();
-        try {
-            return engine.findBestMove(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
-        } finally {
-            engine.shutdown();
-        }
-    }
 
-    @Deprecated
-    public static Move findBestMoveUltimate(GameState state, int maxDepth, long timeMillis) {
-        return findBestMoveWithTime(state, maxDepth, timeMillis);
-    }
+
 }

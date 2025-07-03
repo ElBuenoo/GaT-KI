@@ -13,10 +13,10 @@ public class GameEngine {
 
     // ✅ CONSTRUCTOR INJECTION with proper dependency setup
     public GameEngine() {
-        // Create dependencies in correct order
-        SearchStatistics statistics = new SearchStatistics(); // ✅ No more singleton
+        // Create dependencies in CORRECT ORDER
+        SearchStatistics statistics = new SearchStatistics(); // ✅ First
         TranspositionTable transpositionTable = new TranspositionTable(SearchConfig.TT_SIZE);
-        MoveOrdering moveOrdering = new MoveOrdering();
+        MoveOrdering moveOrdering = new MoveOrdering(statistics); // ✅ Pass statistics!
         Evaluator evaluator = new Evaluator();
 
         // Inject all dependencies
@@ -30,23 +30,16 @@ public class GameEngine {
         this.evaluator = evaluator;
     }
 
+    public SearchEngine getSearchEngine() {
+        return searchEngine;
+    }
+
     public Move findBestMove(GameState state, int depth) {
         return findBestMove(state, depth, SearchConfig.SearchStrategy.PVS_Q);
     }
 
     public Move findBestMove(GameState state, int depth, SearchConfig.SearchStrategy strategy) {
-        // Implementation using injected searchEngine
-        List<Move> moves = MoveGenerator.generateAllMoves(state);
-        if (moves.isEmpty()) return null;
-
-        // Use searchEngine instead of static methods
-        int bestScore = searchEngine.search(state, depth, Integer.MIN_VALUE, Integer.MAX_VALUE,
-                state.redToMove, strategy);
-
-        // Find move that produces this score
-        // ... implementation details
-
-        return moves.get(0); // Placeholder
+        return searchEngine.findBestMove(state, depth, strategy);
     }
 
     public int evaluate(GameState state) {
@@ -66,10 +59,10 @@ public class GameEngine {
     }
 
     public void clearCaches() {
-        searchEngine.getStatistics().reset();
+        searchEngine.clearCaches();
     }
 
     public void resetStatistics() {
-        searchEngine.getStatistics().reset();
+        searchEngine.resetStatistics();
     }
 }

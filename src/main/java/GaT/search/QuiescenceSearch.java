@@ -1,3 +1,5 @@
+package GaT.search;
+
 import GaT.evaluation.Evaluator;
 import GaT.model.GameState;
 import GaT.search.SearchStatistics;
