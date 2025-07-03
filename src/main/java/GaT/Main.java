@@ -41,7 +41,6 @@ public class Main {
 
         // Test backward compatibility
         System.out.println("\n=== Testing Backward Compatibility ===");
-        testBackwardCompatibility();
     }
 
     private static void testStrategy(GameEngine engine, GameState state,
@@ -59,22 +58,5 @@ public class Main {
         System.out.println("Nodes: " + engine.getStatistics().getNodeCount());
     }
 
-    @SuppressWarnings("deprecation")
-    private static void testBackwardCompatibility() {
-        GameState state = new GameState();
 
-        // Old API (deprecated)
-        Move oldMove = GaT.search.Minimax.findBestMove(state, 3);
-        System.out.println("Old API move: " + oldMove);
-
-        // New API
-        GameEngine engine = new GameEngine();
-        Move newMove = engine.findBestMove(state, 3);
-        System.out.println("New API move: " + newMove);
-
-        // Check game over
-        boolean oldGameOver = GaT.search.Minimax.isGameOver(state);
-        boolean newGameOver = engine.isGameOver(state);
-        System.out.println("Game over check: old=" + oldGameOver + ", new=" + newGameOver);
-    }
 }

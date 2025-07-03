@@ -322,13 +322,7 @@ public class TacticalEvaluator extends Evaluator {
 
     // === HELPER METHODS ===
 
-    private int getTotalMaterial(GameState state) {
-        int total = 0;
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            total += state.redStackHeights[i] + state.blueStackHeights[i];
-        }
-        return total;
-    }
+
 
     private boolean areGuardsAdvanced(GameState state) {
         if (state.redGuard != 0) {

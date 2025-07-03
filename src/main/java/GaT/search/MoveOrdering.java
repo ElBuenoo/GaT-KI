@@ -1,9 +1,6 @@
 package GaT.search;
 
-import GaT.model.GameState;
-import GaT.model.Move;
-import GaT.model.TTEntry;
-import GaT.model.SearchConfig;
+import GaT.model.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,7 +65,6 @@ public class MoveOrdering {
             orderMovesBasic(moves, state, depth, ttEntry);
         }
     }
-
 
 
     /**
@@ -509,7 +505,6 @@ public class MoveOrdering {
     }
 
 
-
     // Add these methods to MoveOrdering.java:
 
     /**
@@ -550,34 +545,26 @@ public class MoveOrdering {
         // Additional logic for side-specific history can be added here
     }
 
-    /**
-     * Threat analysis helper class
-     */
+    // In MoveOrdering.java, update the ThreatAnalysis class:
     public static class ThreatAnalysis {
         private final GameState state;
         private final List<Move> threats;
 
-        public ThreatAnalysis() {
-            this.state = null;
-            this.threats = new ArrayList<>();
-        }
-
         public ThreatAnalysis(GameState state) {
             this.state = state;
-            this.threats = analyzeThreatts(state);
+            this.threats = analyzeThreats(state);
         }
 
         public boolean isThreatMove(Move move) {
             return threats.contains(move);
         }
 
-        private List<Move> analyzeThreatts(GameState state) {
-            // Simple threat detection - moves that attack enemy guard
+        private List<Move> analyzeThreats(GameState state) {
             List<Move> allMoves = MoveGenerator.generateAllMoves(state);
             List<Move> threatMoves = new ArrayList<>();
 
             for (Move move : allMoves) {
-                if (Minimax.isCapture(move, state)) {
+                if (GameRules.isCapture(move, state)) {  // Use GameRules
                     long toBit = GameState.bit(move.to);
                     boolean isRed = state.redToMove;
                     boolean capturesGuard = ((isRed ? state.blueGuard : state.redGuard) & toBit) != 0;
