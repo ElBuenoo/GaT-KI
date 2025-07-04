@@ -1,6 +1,7 @@
 package client;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import GaT.engine.GameEngine;
 import GaT.engine.TimedGameEngine;
@@ -12,19 +13,22 @@ import GaT.model.SearchConfig;
 import GaT.model.GameRules;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 
 /**
- * CORRECTED GAME CLIENT - Working version with all fixes
+ * FULLY CORRECTED GAME CLIENT
  *
- * ✅ FIXED: Uses bestMove.toString() for correct server protocol
- * ✅ FIXED: Handles concatenated JSON responses from server
- * ✅ FIXED: Removed problematic getEvaluator() calls
- * ✅ WORKING: Uses modern GameEngine architecture
+ * All fixes implemented:
+ * ✅ Better error handling with stack traces
+ * ✅ Proper move validation
+ * ✅ Robust JSON parsing
+ * ✅ Debug output for troubleshooting
+ * ✅ Fallback mechanisms
  */
 public class GameClient {
     private static final Gson gson = new Gson();
 
-    // NEW ARCHITECTURE - Use modern engines
+    // Game engines
     private static final GameEngine gameEngine = new GameEngine();
     private static final TimedGameEngine timedEngine = new TimedGameEngine();
     private static final TimeManager timeManager = new TimeManager(180000, 30);
@@ -33,6 +37,10 @@ public class GameClient {
     private static int moveNumber = 0;
     private static long gameStartTime = System.currentTimeMillis();
     private static long totalTimeUsed = 0;
+    private static boolean debugMode = true; // Enable for troubleshooting
+
+    // Move history for debugging
+    private static final List<String> moveHistory = new ArrayList<>();
 
     public static void main(String[] args) {
         boolean running = true;
@@ -45,184 +53,394 @@ public class GameClient {
 
         int player = Integer.parseInt(network.getP());
 
-        System.out.println("🎮 Guards & Towers AI Client - CORRECTED VERSION");
-        System.out.println("👤 You are player " + player + " (" + (player == 0 ? "RED" : "BLUE") + ")");
-        System.out.println("🚀 Architecture: NEW (GameEngine + TimedGameEngine)");
-        System.out.println("🎯 Strategy: PVS + Quiescence");
-        System.out.println("🔧 Protocol: FIXED (bestMove.toString())");
-        System.out.println("📦 JSON: FIXED (handles concatenated responses)");
+        printStartupBanner(player);
+
+        // Enable debug mode on timed engine
+        timedEngine.setDebugMode(debugMode);
 
         while (running) {
             try {
                 String gameData = network.send(gson.toJson("get"));
-                if (gameData == null) {
-                    System.out.println("❌ Couldn't get game data");
-                    break;
+                if (gameData == null || gameData.isEmpty()) {
+                    System.err.println("❌ No game data received");
+                    Thread.sleep(1000);
+                    continue;
                 }
 
-                // ✅ FIXED: Handle concatenated JSON responses
-                JsonObject game = parseLastJsonObject(gameData);
+                JsonObject game = parseGameResponse(gameData);
+                if (game == null) {
+                    System.err.println("❌ Failed to parse game data");
+                    continue;
+                }
 
                 if (game.get("bothConnected").getAsBoolean()) {
-                    String turn = game.get("turn").getAsString();
-                    String board = game.get("board").getAsString();
-                    long timeRemaining = game.get("time").getAsLong();
-
-                    if ((player == 0 && turn.equals("r")) || (player == 1 && turn.equals("b"))) {
-                        moveNumber++;
-                        System.out.println("\n" + "=".repeat(70));
-                        System.out.printf("🔥 MOVE #%d - %s TO PLAY%n", moveNumber,
-                                (player == 0 ? "RED" : "BLUE"));
-                        System.out.println("📋 Board FEN: " + board);
-                        System.out.println("⏱️  Time remaining: " + formatTime(timeRemaining));
-
-                        // Calculate and execute move
-                        long moveStartTime = System.currentTimeMillis();
-                        String moveResult = getAIMove(board, player, timeRemaining, network);
-                        long moveTime = System.currentTimeMillis() - moveStartTime;
-
-                        totalTimeUsed += moveTime;
-
-                        if (moveResult != null) {
-                            System.out.printf("⏱️  Move calculated in %dms%n", moveTime);
-                            System.out.printf("📊 Cumulative time used: %s%n", formatTime(totalTimeUsed));
-                            System.out.println("=".repeat(70));
-                        } else {
-                            System.err.println("❌ Failed to get move");
-                            break;
-                        }
-                    }
-
-                    // Check for game end
-                    if (game.has("winner")) {
-                        String winner = game.get("winner").getAsString();
-                        handleGameEnd(winner, player, timeRemaining);
-                        running = false;
-                    } else if (game.has("end") && game.get("end").getAsBoolean()) {
-                        handleGameEnd("Draw", player, timeRemaining);
-                        running = false;
-                    }
-
+                    running = processGameTurn(game, player, network);
                 } else {
-                    System.out.print("⏳ Waiting for opponent");
-                    for (int i = 0; i < 3; i++) {
-                        Thread.sleep(333);
-                        System.out.print(".");
-                    }
-                    System.out.println();
+                    waitForOpponent();
                 }
 
             } catch (Exception e) {
                 System.err.println("❌ Error in game loop: " + e.getMessage());
-                e.printStackTrace();
-                break;
+                if (debugMode) {
+                    e.printStackTrace();
+                }
+
+                // Try to recover
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
 
-        // Cleanup
         cleanup(network);
     }
 
     /**
-     * ✅ FIXED: Extract the last complete JSON object from server response
-     * Handles server responses that contain multiple concatenated JSON objects
+     * Process a game turn
      */
-    private static JsonObject parseLastJsonObject(String response) {
-        try {
-            // Try parsing as-is first
-            return gson.fromJson(response, JsonObject.class);
-        } catch (Exception e) {
-            // Server sent multiple JSON objects - find the last complete one
-            int lastOpenBrace = response.lastIndexOf('{');
-            int lastCloseBrace = response.lastIndexOf('}');
+    private static boolean processGameTurn(JsonObject game, int player, Network network) {
+        String turn = game.get("turn").getAsString();
+        String board = game.get("board").getAsString();
+        long timeRemaining = game.get("time").getAsLong();
 
-            if (lastOpenBrace != -1 && lastCloseBrace != -1 && lastCloseBrace > lastOpenBrace) {
-                String lastJson = response.substring(lastOpenBrace, lastCloseBrace + 1);
-                System.out.println("🔧 Extracted last JSON from concatenated response");
-                return gson.fromJson(lastJson, JsonObject.class);
+        // Check if it's our turn
+        if ((player == 0 && turn.equals("r")) || (player == 1 && turn.equals("b"))) {
+            moveNumber++;
+            printMoveHeader(moveNumber, player, board, timeRemaining);
+
+            // Calculate and execute move
+            long moveStartTime = System.currentTimeMillis();
+            String moveResult = calculateAndSendMove(board, player, timeRemaining, network);
+            long moveTime = System.currentTimeMillis() - moveStartTime;
+
+            if (moveResult != null) {
+                totalTimeUsed += moveTime;
+                moveHistory.add(moveResult);
+                printMoveComplete(moveTime, totalTimeUsed);
+            } else {
+                System.err.println("❌ Failed to calculate/send move");
+                return false; // End game on critical error
             }
-
-            throw new RuntimeException("Could not parse server response: " + response);
         }
+
+        // Check for game end
+        if (game.has("winner")) {
+            handleGameEnd(game.get("winner").getAsString(), player, timeRemaining);
+            return false;
+        } else if (game.has("end") && game.get("end").getAsBoolean()) {
+            handleGameEnd("Draw", player, timeRemaining);
+            return false;
+        }
+
+        return true; // Continue game
     }
 
     /**
-     * ✅ CORRECTED: AI move calculation with working protocol
+     * Calculate and send move with comprehensive error handling
      */
-    private static String getAIMove(String board, int player, long timeRemaining, Network network) {
+    private static String calculateAndSendMove(String board, int player, long timeRemaining, Network network) {
+        GameState state = null;
+
         try {
-            // Parse game state
-            GameState state = parseGameState(board);
+            // Step 1: Parse game state
+            state = parseGameState(board);
             if (state == null) {
-                return getEmergencyMove(network);
+                System.err.println("❌ Failed to parse board state");
+                return sendEmergencyMove(network, null);
             }
 
-            // ✅ FIXED: Simplified analysis (no getEvaluator() calls)
+            // Step 2: Verify it's our turn
+            boolean correctPlayer = (player == 0 && state.redToMove) ||
+                    (player == 1 && !state.redToMove);
+
+            if (!correctPlayer) {
+                System.err.println("❌ Turn mismatch! Player " + player +
+                        " but state says " + (state.redToMove ? "RED" : "BLUE") + " to move");
+                return null; // Don't make a move if it's not our turn
+            }
+
+            // Step 3: Analyze position
             analyzePosition(state);
 
-            // Calculate time allocation
-            long allocatedTime = timeManager.calculateMoveTime(timeRemaining, moveNumber, 60);
-
-            // Apply time pressure adjustments
-            if (timeRemaining < 10000) { // Less than 10 seconds
-                allocatedTime = Math.min(allocatedTime, timeRemaining / 3);
-                System.out.println("⚡ TIME PRESSURE: Reducing allocated time");
-            }
+            // Step 4: Calculate time allocation
+            long allocatedTime = calculateTimeAllocation(timeRemaining, moveNumber);
 
             System.out.printf("🧠 AI CALCULATION:%n");
             System.out.printf("   ⏰ Time allocated: %dms (%.1f%% of remaining)%n",
                     allocatedTime, 100.0 * allocatedTime / timeRemaining);
 
-            // Use TimedGameEngine with PVS + Quiescence
-            Move bestMove = timedEngine.findBestMove(
-                    state,
-                    allocatedTime,
-                    SearchConfig.SearchStrategy.PVS_Q
-            );
+            // Step 5: Find best move
+            Move bestMove = null;
 
-            // Validate move
-            bestMove = validateMove(state, bestMove);
+            try {
+                bestMove = timedEngine.findBestMove(
+                        state,
+                        allocatedTime,
+                        SearchConfig.SearchStrategy.PVS_Q
+                );
+            } catch (Exception e) {
+                System.err.println("❌ Search error: " + e.getMessage());
+                if (debugMode) {
+                    e.printStackTrace();
+                }
+            }
+
+            // Step 6: Validate move
+            bestMove = validateAndRepairMove(state, bestMove);
 
             if (bestMove == null) {
-                return getEmergencyMove(network);
+                System.err.println("❌ No valid move found");
+                return sendEmergencyMove(network, state);
             }
 
-            // ✅ CRITICAL FIX: Use bestMove.toString() - the working format!
-            String moveString = bestMove.toString(); // "D5-D4-1" format
+            // Step 7: Send move
+            String moveString = bestMove.toString();
 
-            // Send move to server
+            if (debugMode) {
+                printMoveDebugInfo(bestMove, state);
+            }
+
             String response = network.send(gson.toJson(moveString));
 
-            if (response == null) {
+            if (response == null || response.isEmpty()) {
                 System.err.println("❌ No response from server for move: " + moveString);
-                return null;
-            } else {
-                System.out.println("📤 Move sent successfully: " + moveString);
-
-                // Show search statistics
-                displaySearchStatistics();
+                // Try once more with a different move
+                return sendEmergencyMove(network, state);
             }
+
+            System.out.println("📤 Move sent successfully: " + moveString);
+            displaySearchStatistics();
 
             return moveString;
 
         } catch (Exception e) {
-            System.err.println("❌ Error in AI calculation: " + e.getMessage());
-            e.printStackTrace();
-            return getEmergencyMove(network);
+            System.err.println("❌ Critical error in move calculation: " + e.getMessage());
+            if (debugMode) {
+                e.printStackTrace();
+            }
+            return sendEmergencyMove(network, state);
         }
     }
 
     /**
-     * ✅ FIXED: Simplified position analysis (no evaluator calls)
+     * Validate and repair move if necessary
+     */
+    private static Move validateAndRepairMove(GameState state, Move move) {
+        if (move == null) {
+            System.err.println("⚠️ AI returned null move");
+            return findBestLegalMove(state);
+        }
+
+        List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
+
+        if (debugMode && legalMoves.size() < 10) {
+            System.out.println("📋 All legal moves:");
+            for (int i = 0; i < legalMoves.size(); i++) {
+                System.out.println("   " + (i+1) + ". " + legalMoves.get(i));
+            }
+        }
+
+        // Check if move is legal
+        if (legalMoves.contains(move)) {
+            System.out.printf("✅ Move validated: %s%n", move);
+            return move;
+        }
+
+        System.err.printf("❌ Invalid move detected: %s%n", move);
+
+        // Try to find similar legal move
+        for (Move legal : legalMoves) {
+            // Same from and to, different amount
+            if (legal.from == move.from && legal.to == move.to) {
+                System.out.println("   🔧 Found similar legal move: " + legal);
+                return legal;
+            }
+        }
+
+        // Try to find move with same from
+        for (Move legal : legalMoves) {
+            if (legal.from == move.from) {
+                System.out.println("   🔧 Found alternative from same square: " + legal);
+                return legal;
+            }
+        }
+
+        System.err.println("   ⚠️ No similar move found, selecting best legal move");
+        return findBestLegalMove(state);
+    }
+
+    /**
+     * Find best legal move with comprehensive strategy
+     */
+    private static Move findBestLegalMove(GameState state) {
+        List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
+
+        if (legalMoves.isEmpty()) {
+            System.err.println("❌ No legal moves available!");
+            return null;
+        }
+
+        System.out.printf("🎯 Selecting from %d legal moves...%n", legalMoves.size());
+
+        // Priority 1: Winning moves
+        for (Move move : legalMoves) {
+            if (isWinningMove(move, state)) {
+                System.out.printf("💎 Found winning move: %s%n", move);
+                return move;
+            }
+        }
+
+        // Priority 2: Capture enemy guard
+        for (Move move : legalMoves) {
+            if (capturesEnemyGuard(move, state)) {
+                System.out.printf("🎯 Found guard capture: %s%n", move);
+                return move;
+            }
+        }
+
+        // Priority 3: Best capture
+        Move bestCapture = findBestCapture(legalMoves, state);
+        if (bestCapture != null) {
+            return bestCapture;
+        }
+
+        // Priority 4: Best positional move
+        Move bestMove = legalMoves.get(0);
+        int bestScore = Integer.MIN_VALUE;
+
+        for (Move move : legalMoves) {
+            int score = evaluateMove(move, state);
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = move;
+            }
+        }
+
+        System.out.printf("📍 Selected positional move: %s (score=%d)%n", bestMove, bestScore);
+        return bestMove;
+    }
+
+    /**
+     * Send emergency move when all else fails
+     */
+    private static String sendEmergencyMove(Network network, GameState state) {
+        System.out.println("🚨 EMERGENCY MOVE SYSTEM ACTIVATED");
+
+        try {
+            // If we have state, try to find a simple move
+            if (state != null) {
+                List<Move> moves = MoveGenerator.generateAllMoves(state);
+                if (!moves.isEmpty()) {
+                    // Prefer safe moves
+                    for (Move move : moves) {
+                        if (!isRiskyMove(move, state)) {
+                            String moveStr = move.toString();
+                            System.out.printf("🚑 Emergency safe move: %s%n", moveStr);
+                            network.send(gson.toJson(moveStr));
+                            return moveStr;
+                        }
+                    }
+
+                    // Any move is better than none
+                    Move emergency = moves.get(0);
+                    String moveStr = emergency.toString();
+                    System.out.printf("🚑 Emergency move: %s%n", moveStr);
+                    network.send(gson.toJson(moveStr));
+                    return moveStr;
+                }
+            }
+
+            // Absolute fallback - try standard opening moves
+            String[] fallbackMoves = {
+                    "D7-D6-1", "A7-A6-1", "G7-G6-1", // Red opening moves
+                    "D1-D2-1", "A1-A2-1", "G1-G2-1"  // Blue opening moves
+            };
+
+            for (String fallback : fallbackMoves) {
+                System.out.printf("🆘 Trying fallback move: %s%n", fallback);
+                String response = network.send(gson.toJson(fallback));
+                if (response != null && !response.isEmpty()) {
+                    return fallback;
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("Emergency move failed: " + e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse game response with better error handling
+     */
+    private static JsonObject parseGameResponse(String response) {
+        if (response == null || response.isEmpty()) {
+            return null;
+        }
+
+        try {
+            // Try direct parse first
+            return gson.fromJson(response, JsonObject.class);
+
+        } catch (JsonSyntaxException e) {
+            // Handle concatenated JSON responses
+            if (debugMode) {
+                System.out.println("🔧 Handling concatenated JSON response");
+            }
+
+            // Find last complete JSON object
+            int lastOpen = response.lastIndexOf('{');
+            int lastClose = response.lastIndexOf('}');
+
+            if (lastOpen >= 0 && lastClose > lastOpen) {
+                try {
+                    String lastJson = response.substring(lastOpen, lastClose + 1);
+                    return gson.fromJson(lastJson, JsonObject.class);
+                } catch (Exception e2) {
+                    System.err.println("Failed to parse extracted JSON: " + e2.getMessage());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse and validate game state
+     */
+    private static GameState parseGameState(String board) {
+        try {
+            GameState state = GameState.fromFen(board);
+
+            // Basic validation
+            if (state.redGuard == 0 && state.blueGuard == 0) {
+                System.err.println("⚠️ Invalid state: no guards found");
+                return null;
+            }
+
+            return state;
+
+        } catch (Exception e) {
+            System.err.println("❌ Failed to parse FEN: " + board);
+            System.err.println("   Error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Analyze position for display
      */
     private static void analyzePosition(GameState state) {
         System.out.println("   🔍 Position Analysis:");
 
-        // Basic position info
         List<Move> allMoves = MoveGenerator.generateAllMoves(state);
         System.out.printf("      📊 Legal moves: %d%n", allMoves.size());
 
-        // Simple material analysis
+        // Material count
         int redMaterial = calculateMaterial(state, true);
         int blueMaterial = calculateMaterial(state, false);
         int materialDiff = redMaterial - blueMaterial;
@@ -230,32 +448,55 @@ public class GameClient {
         System.out.printf("      ⚖️  Material: Red=%d, Blue=%d (diff=%+d)%n",
                 redMaterial, blueMaterial, materialDiff);
 
-        // Check for tactical opportunities
+        // Guard positions
+        if (state.redGuard != 0) {
+            int pos = Long.numberOfTrailingZeros(state.redGuard);
+            System.out.printf("      🔴 Red guard: %s%n", coordinateName(pos));
+        }
+        if (state.blueGuard != 0) {
+            int pos = Long.numberOfTrailingZeros(state.blueGuard);
+            System.out.printf("      🔵 Blue guard: %s%n", coordinateName(pos));
+        }
+
+        // Tactical analysis
         analyzeTacticalOpportunities(state, allMoves);
 
-        // Determine game phase
+        // Game phase
         String gamePhase = determineGamePhase(redMaterial + blueMaterial);
         System.out.printf("      🎯 Game phase: %s%n", gamePhase);
     }
 
     /**
-     * ✅ FIXED: Simple material calculation
+     * Calculate time allocation
      */
-    private static int calculateMaterial(GameState state, boolean isRed) {
-        int total = 0;
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            total += isRed ? state.redStackHeights[i] : state.blueStackHeights[i];
+    private static long calculateTimeAllocation(long timeRemaining, int moveNumber) {
+        long allocated = timeManager.calculateMoveTime(timeRemaining, moveNumber, 60);
+
+        // Emergency adjustments
+        if (timeRemaining < 5000) {
+            allocated = Math.min(allocated, timeRemaining / 4);
+            System.out.println("⚡ CRITICAL TIME: Reducing allocation");
+        } else if (timeRemaining < 10000) {
+            allocated = Math.min(allocated, timeRemaining / 3);
+            System.out.println("⚡ TIME PRESSURE: Reducing allocation");
         }
-        return total;
+
+        // Never use more than 5 seconds per move
+        allocated = Math.min(allocated, 5000);
+
+        // Always leave buffer for network
+        allocated = Math.max(100, allocated - 100);
+
+        return allocated;
     }
 
-    /**
-     * ✅ FIXED: Tactical analysis without evaluator
-     */
+    // === UTILITY METHODS ===
+
     private static void analyzeTacticalOpportunities(GameState state, List<Move> moves) {
         int captures = 0;
         int guardThreats = 0;
         int winningMoves = 0;
+        int checks = 0;
 
         for (Move move : moves) {
             if (GameRules.isCapture(move, state)) {
@@ -266,6 +507,9 @@ public class GameClient {
             }
             if (isWinningMove(move, state)) {
                 winningMoves++;
+            }
+            if (createsCheck(move, state)) {
+                checks++;
             }
         }
 
@@ -278,76 +522,51 @@ public class GameClient {
         if (winningMoves > 0) {
             System.out.printf("      🏆 WINNING MOVES: %d%n", winningMoves);
         }
-    }
-
-    /**
-     * Parse and validate game state
-     */
-    private static GameState parseGameState(String board) {
-        try {
-            return GameState.fromFen(board);
-        } catch (Exception e) {
-            System.err.println("❌ Failed to parse FEN: " + board);
-            try {
-                return new GameState(); // Fallback to starting position
-            } catch (Exception e2) {
-                return null;
-            }
+        if (checks > 0) {
+            System.out.printf("      👑 Checks available: %d%n", checks);
         }
     }
 
-    /**
-     * Validate that the AI move is legal
-     */
-    private static Move validateMove(GameState state, Move move) {
-        if (move == null) {
-            System.err.println("⚠️ AI returned null move");
-            return findBestLegalMove(state);
+    private static boolean isWinningMove(Move move, GameState state) {
+        // Check if guard reaches enemy castle
+        if (GameRules.isGuardMove(move, state)) {
+            boolean isRed = state.redToMove;
+            int targetCastle = isRed ? GameState.getIndex(0, 3) : GameState.getIndex(6, 3);
+            return move.to == targetCastle;
         }
 
-        List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
-
-        if (legalMoves.contains(move)) {
-            System.out.printf("✅ Move validated: %s%n", move);
-            return move;
-        } else {
-            System.err.printf("❌ Invalid move detected: %s%n", move);
-            return findBestLegalMove(state);
-        }
+        // Check if move captures enemy guard
+        return capturesEnemyGuard(move, state);
     }
 
-    /**
-     * Find best legal move as fallback
-     */
-    private static Move findBestLegalMove(GameState state) {
-        List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
+    private static boolean capturesEnemyGuard(Move move, GameState state) {
+        boolean isRed = state.redToMove;
+        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
+        return (enemyGuard & GameState.bit(move.to)) != 0;
+    }
 
-        if (legalMoves.isEmpty()) {
-            throw new IllegalStateException("No legal moves available!");
+    private static boolean createsCheck(Move move, GameState state) {
+        // Simulate move and check if enemy guard is threatened
+        GameState afterMove = state.copy();
+        afterMove.applyMove(move);
+        return GameRules.isInCheck(afterMove);
+    }
+
+    private static boolean isRiskyMove(Move move, GameState state) {
+        // Check if move exposes our guard to capture
+        if (GameRules.isGuardMove(move, state)) {
+            GameState afterMove = state.copy();
+            afterMove.applyMove(move);
+            return GameRules.isInCheck(afterMove);
         }
+        return false;
+    }
 
-        System.out.printf("🎯 Finding best among %d legal moves...%n", legalMoves.size());
-
-        // Priority 1: Winning moves
-        for (Move move : legalMoves) {
-            if (isWinningMove(move, state)) {
-                System.out.printf("💎 Found winning move: %s%n", move);
-                return move;
-            }
-        }
-
-        // Priority 2: Guard captures
-        for (Move move : legalMoves) {
-            if (capturesEnemyGuard(move, state)) {
-                System.out.printf("🎯 Found guard capture: %s%n", move);
-                return move;
-            }
-        }
-
-        // Priority 3: Best capture by value
+    private static Move findBestCapture(List<Move> moves, GameState state) {
         Move bestCapture = null;
         int bestValue = 0;
-        for (Move move : legalMoves) {
+
+        for (Move move : moves) {
             if (GameRules.isCapture(move, state)) {
                 int value = getCaptureValue(move, state);
                 if (value > bestValue) {
@@ -358,49 +577,24 @@ public class GameClient {
         }
 
         if (bestCapture != null) {
-            System.out.printf("⚔️ Found capture: %s (value=%d)%n", bestCapture, bestValue);
-            return bestCapture;
+            System.out.printf("⚔️  Found capture: %s (value=%d)%n", bestCapture, bestValue);
         }
 
-        // Priority 4: Best positional move
-        Move bestMove = legalMoves.get(0);
-        int bestScore = Integer.MIN_VALUE;
-        for (Move move : legalMoves) {
-            int score = evaluateMove(move, state);
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
-            }
-        }
-
-        System.out.printf("📍 Using positional move: %s (score=%d)%n", bestMove, bestScore);
-        return bestMove;
-    }
-
-    // === UTILITY METHODS ===
-
-    private static boolean isWinningMove(Move move, GameState state) {
-        boolean isRed = state.redToMove;
-        int targetCastle = isRed ? GameState.getIndex(0, 3) : GameState.getIndex(6, 3);
-        return move.to == targetCastle && GameRules.isGuardMove(move, state);
-    }
-
-    private static boolean capturesEnemyGuard(Move move, GameState state) {
-        boolean isRed = state.redToMove;
-        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
-        return (enemyGuard & GameState.bit(move.to)) != 0;
+        return bestCapture;
     }
 
     private static int getCaptureValue(Move move, GameState state) {
         long toBit = GameState.bit(move.to);
         boolean isRed = state.redToMove;
 
+        // Guard capture is most valuable
         if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
-            return 1500; // Guard
+            return 10000;
         }
 
+        // Tower capture value based on height
         int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
-        return height * 100; // Tower
+        return height * 100;
     }
 
     private static int evaluateMove(Move move, GameState state) {
@@ -410,21 +604,37 @@ public class GameClient {
         // Advancement bonus
         int fromRank = GameState.rank(move.from);
         int toRank = GameState.rank(move.to);
+
         if (isRed && toRank < fromRank) {
             score += (fromRank - toRank) * 50;
         } else if (!isRed && toRank > fromRank) {
             score += (toRank - fromRank) * 50;
         }
 
-        // Central control bonus
-        int file = GameState.file(move.to);
-        if (file >= 2 && file <= 4) score += 30;
-        if (file == 3) score += 20; // D-file bonus
+        // Central control
+        int toFile = GameState.file(move.to);
+        if (toFile >= 2 && toFile <= 4) {
+            score += 30;
+            if (toFile == 3) score += 20; // D-file bonus
+        }
 
         // Activity bonus
         score += move.amountMoved * 10;
 
+        // Guard moves get bonus
+        if (GameRules.isGuardMove(move, state)) {
+            score += 100;
+        }
+
         return score;
+    }
+
+    private static int calculateMaterial(GameState state, boolean isRed) {
+        int total = 0;
+        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+            total += isRed ? state.redStackHeights[i] : state.blueStackHeights[i];
+        }
+        return total;
     }
 
     private static String determineGamePhase(int totalMaterial) {
@@ -433,55 +643,87 @@ public class GameClient {
         return "OPENING";
     }
 
+    private static String coordinateName(int index) {
+        int rank = GameState.rank(index);
+        int file = GameState.file(index);
+        return "" + (char)('A' + file) + (rank + 1);
+    }
+
     private static void displaySearchStatistics() {
-        String stats = timedEngine.getSearchStats();
-        if (stats != null && !stats.isEmpty()) {
-            System.out.println("   📊 Search Statistics:");
-            String[] lines = stats.split("\n");
-            for (String line : lines) {
-                if (!line.trim().isEmpty()) {
-                    System.out.println("      " + line.trim());
+        try {
+            String stats = timedEngine.getSearchStats();
+            if (stats != null && !stats.isEmpty()) {
+                System.out.println("   📊 Search Statistics:");
+                String[] lines = stats.split("\n");
+                for (String line : lines) {
+                    if (!line.trim().isEmpty() && !line.contains("===")) {
+                        System.out.println("      " + line.trim());
+                    }
                 }
             }
+        } catch (Exception e) {
+            // Ignore stats errors
         }
     }
 
-    private static String getEmergencyMove(Network network) {
-        System.out.println("🚨 EMERGENCY MOVE SYSTEM");
-        try {
-            GameState state = new GameState(); // Use starting position
-            List<Move> moves = MoveGenerator.generateAllMoves(state);
-            if (!moves.isEmpty()) {
-                Move emergency = moves.get(0);
-                String moveStr = emergency.toString();
-                System.out.printf("🚑 Emergency move: %s%n", moveStr);
-                network.send(gson.toJson(moveStr));
-                return moveStr;
-            }
-        } catch (Exception e) {
-            System.err.println("Emergency failed: " + e.getMessage());
-        }
+    // === UI METHODS ===
 
-        // Absolute last resort
-        String lastResort = "A1-A2-1";
-        System.out.printf("🆘 Last resort move: %s%n", lastResort);
-        network.send(gson.toJson(lastResort));
-        return lastResort;
+    private static void printStartupBanner(int player) {
+        System.out.println("🎮 Guards & Towers AI Client - FIXED VERSION 2.0");
+        System.out.println("👤 You are player " + player + " (" + (player == 0 ? "RED" : "BLUE") + ")");
+        System.out.println("🚀 Architecture: GameEngine + TimedGameEngine");
+        System.out.println("🎯 Strategy: PVS + Quiescence");
+        System.out.println("🔧 Debug Mode: " + (debugMode ? "ON" : "OFF"));
+        System.out.println("📝 Features: Robust error handling, move validation, emergency fallbacks");
+        System.out.println();
+    }
+
+    private static void printMoveHeader(int moveNum, int player, String board, long timeRemaining) {
+        System.out.println("\n" + "=".repeat(70));
+        System.out.printf("🔥 MOVE #%d - %s TO PLAY%n", moveNum,
+                (player == 0 ? "RED" : "BLUE"));
+        System.out.println("📋 Board FEN: " + board);
+        System.out.println("⏱️  Time remaining: " + formatTime(timeRemaining));
+    }
+
+    private static void printMoveComplete(long moveTime, long totalTime) {
+        System.out.printf("⏱️  Move calculated in %dms%n", moveTime);
+        System.out.printf("📊 Cumulative time used: %s%n", formatTime(totalTime));
+        System.out.println("=".repeat(70));
+    }
+
+    private static void printMoveDebugInfo(Move move, GameState state) {
+        System.out.println("   🔍 Move Debug Info:");
+        System.out.println("      From: " + coordinateName(move.from) + " (index " + move.from + ")");
+        System.out.println("      To: " + coordinateName(move.to) + " (index " + move.to + ")");
+        System.out.println("      Amount: " + move.amountMoved);
+        System.out.println("      Type: " + (GameRules.isGuardMove(move, state) ? "Guard" : "Tower"));
+        System.out.println("      Capture: " + GameRules.isCapture(move, state));
+    }
+
+    private static void waitForOpponent() throws InterruptedException {
+        System.out.print("⏳ Waiting for opponent");
+        for (int i = 0; i < 3; i++) {
+            Thread.sleep(333);
+            System.out.print(".");
+        }
+        System.out.println();
     }
 
     private static void handleGameEnd(String winner, int player, long timeRemaining) {
-        System.out.println("\n🏁 GAME FINISHED!");
+        System.out.println("\n" + "=".repeat(70));
+        System.out.println("🏁 GAME FINISHED!");
         System.out.println("🏆 Winner: " + winner);
 
         boolean weWon = (player == 0 && winner.equals("r")) ||
                 (player == 1 && winner.equals("b"));
 
         if (weWon) {
-            System.out.println("🎉 WE WON!");
+            System.out.println("🎉 VICTORY! WE WON!");
         } else if (winner.equals("Draw")) {
             System.out.println("🤝 DRAW GAME");
         } else {
-            System.out.println("😔 We lost this time");
+            System.out.println("😔 Defeat - We'll win next time!");
         }
 
         printFinalStatistics(timeRemaining);
@@ -498,9 +740,17 @@ public class GameClient {
             System.out.printf("   ⚡ Average time per move: %dms%n", avgTimePerMove);
         }
 
-        System.out.println("   🏗️  Architecture: NEW (GameEngine + TimedGameEngine)");
-        System.out.println("   🎯 Strategy: PVS + Quiescence");
-        System.out.println("   🔧 Protocol: FIXED");
+        if (!moveHistory.isEmpty()) {
+            System.out.println("   📝 Move history:");
+            for (int i = 0; i < Math.min(10, moveHistory.size()); i++) {
+                System.out.printf("      %d. %s%n", i + 1, moveHistory.get(i));
+            }
+            if (moveHistory.size() > 10) {
+                System.out.println("      ... (" + (moveHistory.size() - 10) + " more moves)");
+            }
+        }
+
+        System.out.println("=".repeat(70));
     }
 
     private static void cleanup(Network network) {
@@ -521,7 +771,7 @@ public class GameClient {
             System.out.println("   ✅ Network connection closed");
         }
 
-        System.out.println("👋 Game client shutdown complete");
+        System.out.println("👋 Thanks for playing! Goodbye!");
     }
 
     private static String formatTime(long milliseconds) {

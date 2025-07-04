@@ -61,13 +61,20 @@ public class SearchEngine {
 
         try {
             return executeSearch(state, depth, alpha, beta, maximizingPlayer, strategy);
-        } catch (RuntimeException e) {
-            if (e.getMessage() != null && e.getMessage().contains("timeout")) {
-                throw e; // Re-throw timeout
-            }
-            System.err.println("Search error: " + e.getMessage());
-            throw new IllegalStateException("Search failed: " + e.getMessage(), e);
+        }  catch (RuntimeException e) {
+        // Bessere Fehlerbehandlung
+        String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+
+        if (e.getMessage() != null && e.getMessage().contains("timeout")) {
+            throw e;
         }
+
+        // Debug-Ausgabe mit Stack Trace
+        System.err.println("Search error: " + errorMsg);
+        e.printStackTrace(); // Zeigt wo der Fehler auftritt
+
+        throw new IllegalStateException("Search failed: " + errorMsg, e);
+    }
     }
 
     // ✅ EXECUTE SEARCH with strategy pattern
