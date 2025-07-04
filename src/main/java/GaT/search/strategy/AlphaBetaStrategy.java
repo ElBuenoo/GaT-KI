@@ -7,17 +7,12 @@ import GaT.search.QuiescenceSearch;
 import GaT.evaluation.Evaluator;
 import java.util.List;
 
-/**
- * Standard Alpha-Beta search implementation with dependency injection
- */
 public class AlphaBetaStrategy implements ISearchStrategy {
 
-    // ✅ INJECTED DEPENDENCIES
     protected final SearchStatistics statistics;
     protected final QuiescenceSearch quiescenceSearch;
     protected final Evaluator evaluator;
 
-    // ✅ CONSTRUCTOR INJECTION
     public AlphaBetaStrategy(SearchStatistics statistics, QuiescenceSearch quiescenceSearch, Evaluator evaluator) {
         this.statistics = statistics;
         this.quiescenceSearch = quiescenceSearch;
@@ -30,11 +25,10 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
         if (moves.isEmpty()) {
-            int score = evaluator.evaluate(context.state, 0); // ✅ Use injected instance
-            return new SearchResult(null, score, 0, statistics.getNodeCount()); // ✅ Use injected instance
+            int score = evaluator.evaluate(context.state, 0);
+            return new SearchResult(null, score, 0, statistics.getNodeCount());
         }
 
-        // Order moves
         TTEntry ttEntry = context.ttable.get(context.state.hash());
         context.moveOrdering.orderMoves(moves, context.state, context.depth, ttEntry);
 
@@ -47,11 +41,9 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             GameState newState = context.state.copy();
             newState.applyMove(move);
 
-            // Create child context
             SearchContext childContext = context.withNewState(newState, context.depth - 1)
                     .withWindow(-beta, -alpha);
 
-            // Recursive search
             int score = -alphaBeta(childContext);
 
             if (context.maximizingPlayer) {
@@ -69,38 +61,35 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             }
 
             if (beta <= alpha) {
-                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
+                statistics.incrementAlphaBetaCutoffs();
                 break;
             }
         }
 
-        // Store in TT
         storeInTT(context, context.state.hash(), bestScore, context.alpha, beta, bestMove);
 
         long timeMs = System.currentTimeMillis() - startTime;
         return new SearchResult(bestMove, bestScore, context.depth,
-                statistics.getNodeCount(), timeMs, false); // ✅ Use injected instance
+                statistics.getNodeCount(), timeMs, false);
     }
 
     protected int alphaBeta(SearchContext context) {
-        statistics.incrementNodeCount(); // ✅ Use injected instance
+        statistics.incrementNodeCount();
 
-        // Check timeout
         if (context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
 
-        // Terminal node check
         if (context.depth <= 0 || GameRules.isGameOver(context.state)) {
-            statistics.incrementLeafNodeCount(); // ✅ Use injected instance
-            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
+            statistics.incrementLeafNodeCount();
+            return evaluator.evaluate(context.state, context.depth);
         }
 
         // TT lookup
         long hash = context.state.hash();
         TTEntry entry = context.ttable.get(hash);
         if (entry != null && entry.depth >= context.depth) {
-            statistics.incrementTTHits(); // ✅ Use injected instance
+            statistics.incrementTTHits();
             if (entry.flag == TTEntry.EXACT) {
                 return entry.score;
             } else if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= context.beta) {
@@ -109,18 +98,27 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                 return entry.score;
             }
         } else {
-            statistics.incrementTTMisses(); // ✅ Use injected instance
+            statistics.incrementTTMisses();
+        }
+
+        // ✅ === NULL MOVE PRUNING - KORRIGIERT ===
+        if (canDoNullMove(context)) {
+            statistics.incrementNullMoveAttempts();
+            int nullMoveScore = doNullMoveSearch(context);
+            if (nullMoveScore >= context.beta) {
+                statistics.incrementNullMoveCutoffs();
+                return context.beta;
+            }
         }
 
         // Generate moves
         List<Move> moves = MoveGenerator.generateAllMoves(context.state);
-        statistics.addMovesGenerated(moves.size()); // ✅ Use injected instance
+        statistics.addMovesGenerated(moves.size());
 
         if (moves.isEmpty()) {
-            return evaluator.evaluate(context.state, context.depth); // ✅ Use injected instance
+            return evaluator.evaluate(context.state, context.depth);
         }
 
-        // Order moves
         context.moveOrdering.orderMoves(moves, context.state, context.depth, entry);
 
         int bestScore = Integer.MIN_VALUE + 1;
@@ -134,33 +132,29 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             GameState newState = context.state.copy();
             newState.applyMove(move);
 
-            statistics.addMovesSearched(1); // ✅ Use injected instance
+            statistics.addMovesSearched(1);
 
-            // Apply reductions/extensions
             int newDepth = context.depth - 1;
 
             // Check extension
             if (GameRules.isInCheck(newState)) {
                 newDepth++;
-                statistics.incrementCheckExtensions(); // ✅ Use injected instance
+                statistics.incrementCheckExtensions();
             }
 
             // LMR for late moves
             if (moveCount > 4 && newDepth > 2 && !GameRules.isCapture(move, context.state)) {
-                // Reduced depth search
                 SearchContext reducedContext = context.withNewState(newState, newDepth - 1)
                         .withWindow(-alpha - 1, -alpha);
                 int score = -alphaBeta(reducedContext);
 
-                // Re-search if it beats alpha
                 if (score > alpha) {
                     SearchContext fullContext = context.withNewState(newState, newDepth)
                             .withWindow(-beta, -alpha);
                     score = -alphaBeta(fullContext);
                 }
-                statistics.incrementLMRReductions(); // ✅ Use injected instance
+                statistics.incrementLMRReductions();
             } else {
-                // Normal search
                 SearchContext childContext = context.withNewState(newState, newDepth)
                         .withWindow(-beta, -alpha);
                 int score = -alphaBeta(childContext);
@@ -174,9 +168,8 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             alpha = Math.max(alpha, bestScore);
 
             if (alpha >= beta) {
-                statistics.incrementAlphaBetaCutoffs(); // ✅ Use injected instance
+                statistics.incrementAlphaBetaCutoffs();
 
-                // Update killer moves
                 if (!GameRules.isCapture(move, context.state)) {
                     context.moveOrdering.storeKillerMove(move, context.depth);
                 }
@@ -184,10 +177,46 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             }
         }
 
-        // Store in TT
         storeInTT(context, hash, bestScore, context.alpha, beta, bestMove);
-
         return bestScore;
+    }
+
+    // ✅ === NULL MOVE PRUNING METHODEN - KORRIGIERT ===
+
+    protected boolean canDoNullMove(SearchContext context) {
+        return context.depth >= SearchConfig.NULL_MOVE_MIN_DEPTH &&
+                !context.isPVNode &&
+                !GameRules.isInCheck(context.state) &&
+                !isEndgamePosition(context.state) &&
+                hasNonPawnMaterial(context.state);
+    }
+
+    protected int doNullMoveSearch(SearchContext context) {
+        // Null Move ausführen
+        GameState nullState = context.state.copy();
+        nullState.redToMove = !nullState.redToMove;
+
+        // Reduzierte Suchtiefe
+        int nullDepth = context.depth - SearchConfig.NULL_MOVE_REDUCTION - 1;
+
+        // ✅ KORRIGIERT: Null Window Search (ohne .maximizingPlayer())
+        SearchContext nullContext = context.withNewState(nullState, nullDepth)
+                .withWindow(-context.beta, -context.beta + 1);
+
+        return -alphaBeta(nullContext);
+    }
+
+    protected boolean isEndgamePosition(GameState state) {
+        int totalMaterial = 0;
+        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+            totalMaterial += state.redStackHeights[i] + state.blueStackHeights[i];
+        }
+        return totalMaterial <= SearchConfig.ENDGAME_MATERIAL_THRESHOLD;
+    }
+
+    protected boolean hasNonPawnMaterial(GameState state) {
+        boolean isRed = state.redToMove;
+        return isRed ? state.redTowers != 0 : state.blueTowers != 0;
     }
 
     private void storeInTT(SearchContext context, long hash, int score,
@@ -203,7 +232,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
 
         TTEntry entry = new TTEntry(score, context.depth, flag, bestMove);
         context.ttable.put(hash, entry);
-        statistics.incrementTTStores(); // ✅ Use injected instance
+        statistics.incrementTTStores();
     }
 
     @Override

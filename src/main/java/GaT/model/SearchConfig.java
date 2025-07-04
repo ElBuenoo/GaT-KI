@@ -1,31 +1,24 @@
 package GaT.model;
 
-/**
- * SEARCH CONFIGURATION - Centralized search parameters
- * Replaces scattered constants and enables easy tuning
- */
 public class SearchConfig {
-
     // === SEARCH LIMITS ===
     public static final int MAX_DEPTH = 99;
     public static final int DEFAULT_TIME_LIMIT_MS = 5000;
     public static final int EMERGENCY_TIME_MS = 200;
     public static final int PANIC_TIME_MS = 50;
 
-
-
-    // Add these constants to SearchConfig.java after the existing constants:
-
     // === ASPIRATION WINDOW PARAMETERS ===
     public static final int ASPIRATION_WINDOW_DELTA = 50;
     public static final int ASPIRATION_WINDOW_MAX_FAILS = 3;
     public static final int ASPIRATION_WINDOW_GROWTH_FACTOR = 4;
+
     // === TRANSPOSITION TABLE ===
     public static final int TT_SIZE = 2_000_000;
     public static final int TT_EVICTION_THRESHOLD = 1_500_000;
 
     // === PRUNING PARAMETERS ===
-    public static final int NULL_MOVE_MIN_DEPTH = 3;
+    public static final int NULL_MOVE_MIN_DEPTH = 3;        // ✅ NEU
+    public static final int NULL_MOVE_REDUCTION = 3;        // ✅ NEU: R-Wert
     public static final int FUTILITY_MAX_DEPTH = 3;
     public static final int LMR_MIN_DEPTH = 3;
     public static final int LMR_MIN_MOVE_COUNT = 4;
@@ -81,7 +74,7 @@ public class SearchConfig {
         }
     }
 
-    // === TIME MANAGEMENT CONFIGURATION ===
+    // Rest der Klasse bleibt unverändert...
     public static class TimeConfig {
         public final long totalTimeMs;
         public final int estimatedMovesLeft;
@@ -101,9 +94,6 @@ public class SearchConfig {
         }
     }
 
-
-
-    // === EVALUATION CONFIGURATION ===
     public static class EvaluationConfig {
         public final boolean usePhasedEvaluation;
         public final boolean usePatternRecognition;
@@ -123,7 +113,6 @@ public class SearchConfig {
         }
     }
 
-    // === SEARCH CONFIGURATION BUILDER ===
     public static class Builder {
         private SearchStrategy strategy = SearchStrategy.PVS_Q;
         private TimeConfig timeConfig = new TimeConfig(5000, 30);
@@ -168,7 +157,6 @@ public class SearchConfig {
         }
     }
 
-    // === COMPLETE SEARCH CONFIGURATION ===
     public static class SearchConfiguration {
         public final SearchStrategy strategy;
         public final TimeConfig timeConfig;
@@ -196,11 +184,6 @@ public class SearchConfig {
         }
     }
 
-    // === PRESET CONFIGURATIONS ===
-
-    /**
-     * Tournament configuration - Maximum strength
-     */
     public static SearchConfiguration tournamentConfig(long timeMs, int movesLeft) {
         return new Builder()
                 .withStrategy(SearchStrategy.PVS_Q)
@@ -211,9 +194,6 @@ public class SearchConfig {
                 .build();
     }
 
-    /**
-     * Blitz configuration - Fast but strong
-     */
     public static SearchConfiguration blitzConfig(long timeMs, int movesLeft) {
         return new Builder()
                 .withStrategy(SearchStrategy.ALPHA_BETA_Q)
@@ -224,9 +204,6 @@ public class SearchConfig {
                 .build();
     }
 
-    /**
-     * Debug configuration - Slower but detailed
-     */
     public static SearchConfiguration debugConfig(long timeMs, int movesLeft) {
         return new Builder()
                 .withStrategy(SearchStrategy.ALPHA_BETA)
@@ -237,9 +214,6 @@ public class SearchConfig {
                 .build();
     }
 
-    /**
-     * Emergency configuration - Minimal time
-     */
     public static SearchConfiguration emergencyConfig() {
         return new Builder()
                 .withStrategy(SearchStrategy.ALPHA_BETA)

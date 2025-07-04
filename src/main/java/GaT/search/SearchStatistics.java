@@ -3,12 +3,7 @@ package GaT.search;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * SEARCH STATISTICS - Centralized metrics tracking
- * Now using dependency injection instead of singleton
- */
 public class SearchStatistics {
-
     // === CORE STATISTICS ===
     private long nodeCount = 0;
     private long qNodeCount = 0;
@@ -25,7 +20,8 @@ public class SearchStatistics {
     // === PRUNING STATISTICS ===
     private long alphaBetaCutoffs = 0;
     private long reverseFutilityCutoffs = 0;
-    private long nullMoveCutoffs = 0;
+    private long nullMoveCutoffs = 0;       // ✅ NEU
+    private long nullMoveAttempts = 0;      // ✅ NEU
     private long futilityCutoffs = 0;
     private long lmrReductions = 0;
     private long checkExtensions = 0;
@@ -53,12 +49,10 @@ public class SearchStatistics {
     private int totalMovesGenerated = 0;
     private int totalMovesSearched = 0;
 
-    // ✅ REMOVED SINGLETON PATTERN - now use normal constructor
     public SearchStatistics() {
         reset();
     }
 
-    // === RESET AND INITIALIZATION ===
     public void reset() {
         nodeCount = 0;
         qNodeCount = 0;
@@ -73,7 +67,8 @@ public class SearchStatistics {
 
         alphaBetaCutoffs = 0;
         reverseFutilityCutoffs = 0;
-        nullMoveCutoffs = 0;
+        nullMoveCutoffs = 0;        // ✅ NEU
+        nullMoveAttempts = 0;       // ✅ NEU
         futilityCutoffs = 0;
         lmrReductions = 0;
         checkExtensions = 0;
@@ -137,7 +132,8 @@ public class SearchStatistics {
     // === PRUNING ===
     public void incrementAlphaBetaCutoffs() { alphaBetaCutoffs++; }
     public void incrementReverseFutilityCutoffs() { reverseFutilityCutoffs++; }
-    public void incrementNullMoveCutoffs() { nullMoveCutoffs++; }
+    public void incrementNullMoveCutoffs() { nullMoveCutoffs++; }     // ✅ NEU
+    public void incrementNullMoveAttempts() { nullMoveAttempts++; }   // ✅ NEU
     public void incrementFutilityCutoffs() { futilityCutoffs++; }
     public void incrementLMRReductions() { lmrReductions++; }
     public void incrementCheckExtensions() { checkExtensions++; }
@@ -181,6 +177,13 @@ public class SearchStatistics {
         return total > 0 ? (double) ttHits / total : 0.0;
     }
 
+    // ✅ NEU: Null Move Statistiken
+    public long getNullMoveCutoffs() { return nullMoveCutoffs; }
+    public long getNullMoveAttempts() { return nullMoveAttempts; }
+    public double getNullMoveSuccessRate() {
+        return nullMoveAttempts > 0 ? (double) nullMoveCutoffs / nullMoveAttempts : 0.0;
+    }
+
     public long getTotalCutoffs() {
         return alphaBetaCutoffs + reverseFutilityCutoffs + nullMoveCutoffs +
                 futilityCutoffs + qCutoffs + deltaPruningCutoffs;
@@ -201,7 +204,6 @@ public class SearchStatistics {
 
     public int getIterationsCompleted() { return iterationsCompleted; }
 
-    // === ANALYSIS METHODS ===
     public double getSearchEfficiency() {
         double ttEfficiency = getTTHitRate() * 20;
         double cutoffEfficiency = getCutoffRate() * 30;
@@ -221,7 +223,6 @@ public class SearchStatistics {
                         HashMap::putAll);
     }
 
-    // === FORMATTED OUTPUT ===
     public String getSummary() {
         StringBuilder sb = new StringBuilder();
         sb.append("=== SEARCH STATISTICS ===\n");
@@ -240,9 +241,10 @@ public class SearchStatistics {
             sb.append(String.format("  RFP: %,d (%.1f%%)\n",
                     reverseFutilityCutoffs, 100.0 * reverseFutilityCutoffs / nodeCount));
         }
-        if (nullMoveCutoffs > 0) {
-            sb.append(String.format("  Null Move: %,d (%.1f%%)\n",
-                    nullMoveCutoffs, 100.0 * nullMoveCutoffs / nodeCount));
+        // ✅ NEU: Null Move Statistiken
+        if (nullMoveAttempts > 0) {
+            sb.append(String.format("  Null Move: %,d/%,d (%.1f%% success)\n",
+                    nullMoveCutoffs, nullMoveAttempts, getNullMoveSuccessRate() * 100));
         }
         if (futilityCutoffs > 0) {
             sb.append(String.format("  Futility: %,d (%.1f%%)\n",
@@ -272,19 +274,19 @@ public class SearchStatistics {
     }
 
     public String getBriefSummary() {
-        return String.format("Nodes: %,d, Time: %,dms, NPS: %.1fk, TT: %.1f%%, Cuts: %.1f%%, Eff: %.1f",
+        return String.format("Nodes: %,d, Time: %,dms, NPS: %.1fk, TT: %.1f%%, Cuts: %.1f%%, NMP: %.1f%%, Eff: %.1f",
                 getTotalNodes(), totalSearchTime, getNodesPerSecond() / 1000,
-                getTTHitRate() * 100, getCutoffRate() * 100, getSearchEfficiency());
+                getTTHitRate() * 100, getCutoffRate() * 100, getNullMoveSuccessRate() * 100, getSearchEfficiency());
     }
 
     public String toCSV() {
-        return String.format("%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.1f\n",
+        return String.format("%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.1f\n",
                 nodeCount, qNodeCount, maxDepthReached, totalSearchTime,
                 ttHits + ttMisses, getTTHitRate(), getCutoffRate(),
-                getAverageBranchingFactor(), getSearchEfficiency());
+                getNullMoveSuccessRate(), getAverageBranchingFactor(), getSearchEfficiency());
     }
 
     public static String getCSVHeader() {
-        return "nodes,qnodes,depth,time_ms,tt_probes,tt_hit_rate,cutoff_rate,branching_factor,efficiency\n";
+        return "nodes,qnodes,depth,time_ms,tt_probes,tt_hit_rate,cutoff_rate,nmp_success_rate,branching_factor,efficiency\n";
     }
 }
