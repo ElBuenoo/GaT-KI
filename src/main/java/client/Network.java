@@ -35,6 +35,14 @@ public class Network {
 
             byte[] buffer = new byte[INITIAL_BUFFER_SIZE];
             InputStream in = client.getInputStream();
+
+            // ✅ FIXED: Wrap Thread.sleep in try-catch
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
             int bytesRead = in.read(buffer);
 
             if (bytesRead > 0) {
@@ -72,6 +80,13 @@ public class Network {
 
             // Read data in chunks to handle large responses
             StringBuilder response = new StringBuilder();
+
+            // ✅ FIXED: Wrap Thread.sleep in try-catch
+            try {
+                Thread.sleep(200); // Give server time to process
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
 
             // First read
             bytesRead = in.read(buffer);
@@ -119,5 +134,23 @@ public class Network {
                 e.printStackTrace();
             }
         }
+    }
+
+    /**
+     * Check if connected
+     */
+    public boolean isConnected() {
+        return client != null && !client.isClosed() && client.isConnected();
+    }
+
+    /**
+     * Get connection info for debugging
+     */
+    public void diagnose() {
+        System.out.println("🔍 NETWORK DIAGNOSTICS:");
+        System.out.println("  Server: " + server + ":" + port);
+        System.out.println("  Player: " + playerNumber);
+        System.out.println("  Connected: " + isConnected());
+        System.out.println("  Timeout: " + SOCKET_TIMEOUT + "ms");
     }
 }
