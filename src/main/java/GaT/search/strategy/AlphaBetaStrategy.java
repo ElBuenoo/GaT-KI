@@ -76,7 +76,8 @@ public class AlphaBetaStrategy implements ISearchStrategy {
     protected int alphaBeta(SearchContext context) {
         statistics.incrementNodeCount();
 
-        if (context.timeoutChecker.getAsBoolean()) {
+        // FIX: Null-Check für timeoutChecker
+        if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
 
@@ -101,7 +102,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
             statistics.incrementTTMisses();
         }
 
-        // ✅ === NULL MOVE PRUNING - KORRIGIERT ===
+        // Null move pruning
         if (canDoNullMove(context)) {
             statistics.incrementNullMoveAttempts();
             int nullMoveScore = doNullMoveSearch(context);
@@ -142,11 +143,14 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                 statistics.incrementCheckExtensions();
             }
 
-            // LMR for late moves
+            // FIX: Score-Berechnung und -Verwendung korrigiert
+            int score;
+
             if (moveCount > 4 && newDepth > 2 && !GameRules.isCapture(move, context.state)) {
+                // Late Move Reduction
                 SearchContext reducedContext = context.withNewState(newState, newDepth - 1)
                         .withWindow(-alpha - 1, -alpha);
-                int score = -alphaBeta(reducedContext);
+                score = -alphaBeta(reducedContext);
 
                 if (score > alpha) {
                     SearchContext fullContext = context.withNewState(newState, newDepth)
@@ -155,21 +159,22 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                 }
                 statistics.incrementLMRReductions();
             } else {
+                // Normal search
                 SearchContext childContext = context.withNewState(newState, newDepth)
                         .withWindow(-beta, -alpha);
-                int score = -alphaBeta(childContext);
+                score = -alphaBeta(childContext);
+            }
 
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMove = move;
-                }
+            // Score-Verarbeitung für ALLE Züge
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = move;
             }
 
             alpha = Math.max(alpha, bestScore);
 
             if (alpha >= beta) {
                 statistics.incrementAlphaBetaCutoffs();
-
                 if (!GameRules.isCapture(move, context.state)) {
                     context.moveOrdering.storeKillerMove(move, context.depth);
                 }
@@ -180,8 +185,6 @@ public class AlphaBetaStrategy implements ISearchStrategy {
         storeInTT(context, hash, bestScore, context.alpha, beta, bestMove);
         return bestScore;
     }
-
-    // ✅ === NULL MOVE PRUNING METHODEN - KORRIGIERT ===
 
     protected boolean canDoNullMove(SearchContext context) {
         return context.depth >= SearchConfig.NULL_MOVE_MIN_DEPTH &&
@@ -199,7 +202,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
         // Reduzierte Suchtiefe
         int nullDepth = context.depth - SearchConfig.NULL_MOVE_REDUCTION - 1;
 
-        // ✅ KORRIGIERT: Null Window Search (ohne .maximizingPlayer())
+        // Null Window Search
         SearchContext nullContext = context.withNewState(nullState, nullDepth)
                 .withWindow(-context.beta, -context.beta + 1);
 
@@ -219,7 +222,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
         return isRed ? state.redTowers != 0 : state.blueTowers != 0;
     }
 
-    private void storeInTT(SearchContext context, long hash, int score,
+    protected void storeInTT(SearchContext context, long hash, int score,
                            int originalAlpha, int beta, Move bestMove) {
         int flag;
         if (score <= originalAlpha) {

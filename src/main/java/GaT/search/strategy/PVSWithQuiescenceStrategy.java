@@ -15,7 +15,7 @@ public class PVSWithQuiescenceStrategy extends PVSStrategy {
     protected int pvSearch(SearchContext context, boolean isPVNode) {
         statistics.incrementNodeCount();
 
-        if (context.timeoutChecker.getAsBoolean()) {
+        if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
 
