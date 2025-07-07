@@ -15,6 +15,7 @@ public class PVSWithQuiescenceStrategy extends PVSStrategy {
     protected int pvSearch(SearchContext context, boolean isPVNode) {
         statistics.incrementNodeCount();
 
+        // Timeout check
         if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
@@ -53,18 +54,38 @@ public class PVSWithQuiescenceStrategy extends PVSStrategy {
             statistics.incrementTTMisses();
         }
 
-        // ✅ === NULL MOVE PRUNING - KORRIGIERT ===
+        // Null move pruning - KORRIGIERT
         if (!isPVNode && canDoNullMove(context)) {
             statistics.incrementNullMoveAttempts();
-            int nullMoveScore = doNullMoveSearch(context);
-            if (nullMoveScore >= context.beta) {
-                statistics.incrementNullMoveCutoffs();
-                return context.beta;
+            try {
+                int nullMoveScore = doNullMoveSearch(context);
+                if (nullMoveScore >= context.beta) {
+                    statistics.incrementNullMoveCutoffs();
+                    return context.beta;
+                }
+            } catch (Exception e) {
+                // Bei Fehler im Null-Move Search einfach weitermachen
+                System.err.println("Null move search error: " + e.getMessage());
             }
         }
 
         // Continue with normal PVS
         return super.pvSearch(context, isPVNode);
+    }
+
+    @Override
+    protected int doNullMoveSearch(SearchContext context) {
+        try {
+            // Create null move context safely
+            SearchContext nullContext = context.forNullMove(
+                    context.depth - SearchConfig.NULL_MOVE_REDUCTION - 1);
+
+            return -pvSearch(nullContext, false);
+        } catch (Exception e) {
+            // Fallback bei Fehler
+            System.err.println("Null move creation failed: " + e.getMessage());
+            return context.alpha;
+        }
     }
 
     @Override

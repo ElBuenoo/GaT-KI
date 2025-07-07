@@ -9,7 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * SEARCH ENGINE - Now uses dependency injection
+ * SEARCH ENGINE - Fixed with better error handling and debug output
  */
 public class SearchEngine {
 
@@ -26,16 +26,19 @@ public class SearchEngine {
     // === TIMEOUT SUPPORT ===
     private BooleanSupplier timeoutChecker = null;
 
-    // ✅ CONSTRUCTOR INJECTION - all dependencies injected
+    // === DEBUG SUPPORT ===
+    private boolean debugMode = false;
+
+    // === CONSTRUCTOR ===
     public SearchEngine(Evaluator evaluator, MoveOrdering moveOrdering,
                         TranspositionTable transpositionTable, SearchStatistics statistics) {
         this.evaluator = evaluator;
         this.moveOrdering = moveOrdering;
         this.transpositionTable = transpositionTable;
         this.statistics = statistics;
-        this.quiescenceSearch = new QuiescenceSearch(evaluator, statistics); // ✅ Inject dependencies
+        this.quiescenceSearch = new QuiescenceSearch(evaluator, statistics);
 
-        // ✅ CREATE STRATEGIES WITH ALL DEPENDENCIES
+        // Create strategies with all dependencies
         this.strategies = new HashMap<>();
         this.strategies.put(SearchConfig.SearchStrategy.ALPHA_BETA,
                 new AlphaBetaStrategy(statistics, quiescenceSearch, evaluator));
@@ -47,7 +50,7 @@ public class SearchEngine {
                 new PVSWithQuiescenceStrategy(statistics, quiescenceSearch, evaluator));
     }
 
-    // ✅ MAIN SEARCH METHOD - improved error handling
+    // === MAIN SEARCH METHOD ===
     public int search(GameState state, int depth, int alpha, int beta,
                       boolean maximizingPlayer, SearchConfig.SearchStrategy strategy) {
 
@@ -61,23 +64,28 @@ public class SearchEngine {
 
         try {
             return executeSearch(state, depth, alpha, beta, maximizingPlayer, strategy);
-        }  catch (RuntimeException e) {
-        // Bessere Fehlerbehandlung
-        String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        } catch (RuntimeException e) {
+            // Bessere Fehlerbehandlung
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 
-        if (e.getMessage() != null && e.getMessage().contains("timeout")) {
-            throw e;
+            if (e.getMessage() != null && e.getMessage().contains("timeout")) {
+                throw e; // Timeout exceptions weitergeben
+            }
+
+            // Debug-Ausgabe
+            if (debugMode) {
+                System.err.println("Search error: " + errorMsg);
+                System.err.println("State: " + state);
+                System.err.println("Depth: " + depth);
+                System.err.println("Strategy: " + strategy);
+                e.printStackTrace();
+            }
+
+            throw new IllegalStateException("Search failed: " + errorMsg, e);
         }
-
-        // Debug-Ausgabe mit Stack Trace
-        System.err.println("Search error: " + errorMsg);
-        e.printStackTrace(); // Zeigt wo der Fehler auftritt
-
-        throw new IllegalStateException("Search failed: " + errorMsg, e);
-    }
     }
 
-    // ✅ EXECUTE SEARCH with strategy pattern
+    // === EXECUTE SEARCH ===
     private int executeSearch(GameState state, int depth, int alpha, int beta,
                               boolean maximizingPlayer, SearchConfig.SearchStrategy strategyType) {
 
@@ -87,27 +95,50 @@ public class SearchEngine {
             strategy = strategies.get(SearchConfig.SearchStrategy.ALPHA_BETA);
         }
 
-        // Create search context
-        SearchContext context = new SearchContext.Builder()
-                .state(state)
-                .depth(depth)
-                .window(alpha, beta)
-                .maximizingPlayer(maximizingPlayer)
-                .pvNode(true)
-                .timeoutChecker(timeoutChecker != null ? timeoutChecker : () -> false)
-                .components(evaluator, transpositionTable, moveOrdering, statistics)
-                .build();
+        // Create search context with validation
+        SearchContext context = null;
+        try {
+            context = new SearchContext.Builder()
+                    .state(state)
+                    .depth(depth)
+                    .window(alpha, beta)
+                    .maximizingPlayer(maximizingPlayer)
+                    .pvNode(true)
+                    .timeoutChecker(timeoutChecker != null ? timeoutChecker : () -> false)
+                    .components(evaluator, transpositionTable, moveOrdering, statistics)
+                    .build();
+        } catch (Exception e) {
+            System.err.println("Failed to create SearchContext: " + e.getMessage());
+            throw new IllegalStateException("Context creation failed", e);
+        }
 
         // Execute search
         SearchResult result = strategy.search(context);
         return result.score;
     }
 
-    // ✅ FIND BEST MOVE - main public API
+    // === FIND BEST MOVE ===
     public Move findBestMove(GameState state, int depth, SearchConfig.SearchStrategy strategyType) {
         if (state == null) {
             System.err.println("Error: null game state");
             return null;
+        }
+
+        // Debug output
+        if (debugMode) {
+            System.out.println("DEBUG: Starting search");
+            System.out.println("  State hash: " + state.hash());
+            System.out.println("  Depth: " + depth);
+            System.out.println("  Strategy: " + strategyType);
+            System.out.println("  Turn: " + (state.redToMove ? "RED" : "BLUE"));
+
+            List<Move> moves = MoveGenerator.generateAllMoves(state);
+            System.out.println("  Legal moves: " + moves.size());
+            if (moves.size() < 10) {
+                for (Move m : moves) {
+                    System.out.println("    - " + m);
+                }
+            }
         }
 
         // Reset statistics
@@ -122,27 +153,38 @@ public class SearchEngine {
         }
 
         // Create search context
-        SearchContext context = new SearchContext.Builder()
-                .state(state)
-                .depth(depth)
-                .window(Integer.MIN_VALUE + 1, Integer.MAX_VALUE - 1)
-                .maximizingPlayer(state.redToMove)
-                .pvNode(true)
-                .timeoutChecker(timeoutChecker != null ? timeoutChecker : () -> false)
-                .components(evaluator, transpositionTable, moveOrdering, statistics)
-                .build();
+        SearchContext context = null;
+        try {
+            context = new SearchContext.Builder()
+                    .state(state)
+                    .depth(depth)
+                    .window(Integer.MIN_VALUE + 1, Integer.MAX_VALUE - 1)
+                    .maximizingPlayer(state.redToMove)
+                    .pvNode(true)
+                    .timeoutChecker(timeoutChecker != null ? timeoutChecker : () -> false)
+                    .components(evaluator, transpositionTable, moveOrdering, statistics)
+                    .build();
+        } catch (Exception e) {
+            System.err.println("Failed to create initial SearchContext: " + e.getMessage());
+            e.printStackTrace();
+            return fallbackMove(state);
+        }
 
         try {
             SearchResult result = strategy.search(context);
             statistics.endSearch();
 
             if (result.bestMove != null) {
-                System.out.println("Search completed: " + strategy.getName());
-                System.out.println("Best move: " + result.bestMove);
-                System.out.println("Score: " + result.score);
-                System.out.println("Depth: " + result.depth);
-                System.out.println("Nodes: " + result.nodesSearched);
-                System.out.println("Time: " + result.timeMs + "ms");
+                if (debugMode || depth >= 5) {
+                    System.out.println("Search completed: " + strategy.getName());
+                    System.out.println("Best move: " + result.bestMove);
+                    System.out.println("Score: " + result.score);
+                    System.out.println("Depth: " + result.depth);
+                    System.out.println("Nodes: " + result.nodesSearched);
+                    System.out.println("Time: " + result.timeMs + "ms");
+                }
+            } else {
+                System.err.println("Search returned null move!");
             }
 
             return result.bestMove;
@@ -150,15 +192,17 @@ public class SearchEngine {
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("timeout")) {
                 System.out.println("Search timeout - returning best so far");
-                // Could try to get partial result here
                 return null;
             }
+
             System.err.println("Search error: " + e.getMessage());
+            e.printStackTrace();
+
             return fallbackMove(state);
         }
     }
 
-    // ✅ CONVENIENCE METHODS
+    // === CONVENIENCE METHODS ===
     public Move findBestMove(GameState state, int depth) {
         return findBestMove(state, depth, SearchConfig.SearchStrategy.PVS_Q);
     }
@@ -167,24 +211,30 @@ public class SearchEngine {
         return evaluator.evaluate(state, 0);
     }
 
-    // ✅ FALLBACK MOVE - in case of errors
+    // === FALLBACK MOVE ===
     private Move fallbackMove(GameState state) {
+        System.out.println("Using fallback move selection");
+
         List<Move> moves = MoveGenerator.generateAllMoves(state);
         if (moves.isEmpty()) {
+            System.err.println("No legal moves available!");
             return null;
         }
 
         // Try to find a reasonable move
         for (Move move : moves) {
             if (GameRules.isCapture(move, state)) {
+                System.out.println("Fallback: selecting capture " + move);
                 return move; // Prefer captures
             }
         }
 
-        return moves.get(0); // Return first legal move
+        Move firstMove = moves.get(0);
+        System.out.println("Fallback: selecting first legal move " + firstMove);
+        return firstMove;
     }
 
-    // ✅ LEGACY SUPPORT METHODS (for backward compatibility)
+    // === LEGACY SUPPORT METHODS ===
     public int alphaBetaSearch(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
         return search(state, depth, alpha, beta, maximizingPlayer, SearchConfig.SearchStrategy.ALPHA_BETA);
     }
@@ -203,12 +253,19 @@ public class SearchEngine {
     // === TIMEOUT MANAGEMENT ===
     public void setTimeoutChecker(BooleanSupplier checker) {
         this.timeoutChecker = checker;
-        // Also set it for strategies if they support it
-        // (This is a simplification - in a full implementation you'd pass it through context)
     }
 
     public void clearTimeoutChecker() {
         this.timeoutChecker = null;
+    }
+
+    // === DEBUG MODE ===
+    public void setDebugMode(boolean debug) {
+        this.debugMode = debug;
+    }
+
+    public boolean isDebugMode() {
+        return debugMode;
     }
 
     // === COMPONENT ACCESS ===

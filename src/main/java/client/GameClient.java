@@ -29,6 +29,7 @@ public class GameClient {
     private static final Gson gson = new Gson();
 
     // Game engines
+
     private static final GameEngine gameEngine = new GameEngine();
     private static final TimedGameEngine timedEngine = new TimedGameEngine();
     private static final TimeManager timeManager = new TimeManager(180000, 30);

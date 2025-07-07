@@ -76,11 +76,12 @@ public class AlphaBetaStrategy implements ISearchStrategy {
     protected int alphaBeta(SearchContext context) {
         statistics.incrementNodeCount();
 
-        // FIX: Null-Check für timeoutChecker
+        // Timeout check
         if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
 
+        // Terminal node check
         if (context.depth <= 0 || GameRules.isGameOver(context.state)) {
             statistics.incrementLeafNodeCount();
             return evaluator.evaluate(context.state, context.depth);
@@ -143,7 +144,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
                 statistics.incrementCheckExtensions();
             }
 
-            // FIX: Score-Berechnung und -Verwendung korrigiert
+            // KRITISCHER FIX: score Variable muss IMMER initialisiert werden!
             int score;
 
             if (moveCount > 4 && newDepth > 2 && !GameRules.isCapture(move, context.state)) {
@@ -223,7 +224,7 @@ public class AlphaBetaStrategy implements ISearchStrategy {
     }
 
     protected void storeInTT(SearchContext context, long hash, int score,
-                           int originalAlpha, int beta, Move bestMove) {
+                             int originalAlpha, int beta, Move bestMove) {
         int flag;
         if (score <= originalAlpha) {
             flag = TTEntry.UPPER_BOUND;

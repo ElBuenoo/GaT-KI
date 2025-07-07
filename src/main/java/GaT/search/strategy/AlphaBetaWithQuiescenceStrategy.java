@@ -22,7 +22,7 @@ public class AlphaBetaWithQuiescenceStrategy extends AlphaBetaStrategy {
     protected int alphaBeta(SearchContext context) {
         statistics.incrementNodeCount();
 
-        // FIX: Null-Check für timeoutChecker
+        // Timeout check
         if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
@@ -96,7 +96,7 @@ public class AlphaBetaWithQuiescenceStrategy extends AlphaBetaStrategy {
                 statistics.incrementCheckExtensions();
             }
 
-            // FIX: Score-Berechnung und -Verwendung korrigiert
+            // KRITISCHER FIX: score Variable muss IMMER initialisiert werden!
             int score;
 
             if (moveCount > 4 && newDepth > 2 && !GameRules.isCapture(move, context.state)) {

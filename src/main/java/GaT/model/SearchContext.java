@@ -14,6 +14,7 @@ import java.util.function.BooleanSupplier;
  * - timeoutChecker is never null (prevents NPEs)
  * - Proper handling of maximizingPlayer toggle
  * - Safe integer bounds to prevent overflow
+ * - NULL-CHECKS für alle kritischen Methoden
  */
 public class SearchContext {
     public final GameState state;
@@ -52,8 +53,18 @@ public class SearchContext {
     /**
      * Create a new context with different state and depth
      * IMPORTANT: This toggles maximizingPlayer!
+     * ENHANCED: Added null checks and validation
      */
     public SearchContext withNewState(GameState newState, int newDepth) {
+        // NULL-CHECK hinzugefügt
+        if (newState == null) {
+            throw new IllegalArgumentException("newState cannot be null");
+        }
+
+        if (newDepth < 0) {
+            throw new IllegalArgumentException("newDepth cannot be negative: " + newDepth);
+        }
+
         return new Builder()
                 .state(newState)
                 .depth(newDepth)
@@ -70,6 +81,11 @@ public class SearchContext {
      * Keeps the same player (used for null window searches)
      */
     public SearchContext withWindow(int newAlpha, int newBeta) {
+        // Validierung
+        if (newAlpha >= newBeta) {
+            throw new IllegalArgumentException("Invalid window: alpha=" + newAlpha + " >= beta=" + newBeta);
+        }
+
         return new Builder()
                 .state(this.state)
                 .depth(this.depth)
@@ -84,15 +100,24 @@ public class SearchContext {
     /**
      * Create a new context for null move search
      * Toggles player but keeps same depth
+     * ENHANCED: Better null move context creation
      */
     public SearchContext forNullMove(int reducedDepth) {
+        if (reducedDepth < 0) {
+            reducedDepth = 0; // Clamp to 0 minimum
+        }
+
         GameState nullState = this.state.copy();
+        if (nullState == null) {
+            throw new IllegalStateException("Failed to copy game state for null move");
+        }
+
         nullState.redToMove = !nullState.redToMove;  // Toggle turn
 
         return new Builder()
                 .state(nullState)
                 .depth(reducedDepth)
-                .window(this.alpha, this.beta)
+                .window(-this.beta, -this.beta + 1)  // Null window
                 .maximizingPlayer(!this.maximizingPlayer)  // Toggle player
                 .pvNode(false)  // Null moves are not PV nodes
                 .timeoutChecker(this.timeoutChecker)
@@ -105,7 +130,12 @@ public class SearchContext {
      * Safe method that handles null checker
      */
     public boolean shouldTimeout() {
-        return timeoutChecker != null && timeoutChecker.getAsBoolean();
+        try {
+            return timeoutChecker != null && timeoutChecker.getAsBoolean();
+        } catch (Exception e) {
+            // Bei Exceptions im Timeout-Check true zurückgeben um Suche zu beenden
+            return true;
+        }
     }
 
     /**
@@ -113,12 +143,14 @@ public class SearchContext {
      */
     @Override
     public String toString() {
-        return String.format("SearchContext[depth=%d, alpha=%d, beta=%d, maxPlayer=%s, pvNode=%s]",
-                depth, alpha, beta, maximizingPlayer, isPVNode);
+        return String.format("SearchContext[depth=%d, alpha=%d, beta=%d, maxPlayer=%s, pvNode=%s, state=%s]",
+                depth, alpha, beta, maximizingPlayer, isPVNode,
+                (state != null ? "hash=" + state.hash() : "null"));
     }
 
     /**
      * Builder for SearchContext
+     * ENHANCED: Better validation and error messages
      */
     public static class Builder {
         private GameState state;
@@ -139,7 +171,7 @@ public class SearchContext {
         }
 
         public Builder depth(int depth) {
-            this.depth = depth;
+            this.depth = Math.max(0, depth); // Ensure non-negative
             return this;
         }
 
@@ -147,6 +179,14 @@ public class SearchContext {
             // Ensure safe bounds
             this.alpha = Math.max(Integer.MIN_VALUE + 1, alpha);
             this.beta = Math.min(Integer.MAX_VALUE - 1, beta);
+
+            // Ensure alpha < beta
+            if (this.alpha >= this.beta) {
+                // Auto-correct invalid window
+                this.alpha = Integer.MIN_VALUE + 1;
+                this.beta = Integer.MAX_VALUE - 1;
+            }
+
             return this;
         }
 
@@ -199,7 +239,9 @@ public class SearchContext {
 
             // Ensure valid window
             if (alpha >= beta) {
-                throw new IllegalArgumentException("Invalid window: alpha=" + alpha + " >= beta=" + beta);
+                // Auto-correct instead of throwing
+                alpha = Integer.MIN_VALUE + 1;
+                beta = Integer.MAX_VALUE - 1;
             }
 
             return new SearchContext(this);
@@ -212,6 +254,10 @@ public class SearchContext {
     public static SearchContext createInitial(GameState state, int depth,
                                               Evaluator evaluator, TranspositionTable tt,
                                               MoveOrdering moveOrdering, SearchStatistics stats) {
+        if (state == null) {
+            throw new IllegalArgumentException("Initial state cannot be null");
+        }
+
         return new Builder()
                 .state(state)
                 .depth(depth)
@@ -230,6 +276,14 @@ public class SearchContext {
                                                   BooleanSupplier timeoutChecker,
                                                   Evaluator evaluator, TranspositionTable tt,
                                                   MoveOrdering moveOrdering, SearchStatistics stats) {
+        if (state == null) {
+            throw new IllegalArgumentException("State cannot be null");
+        }
+
+        if (timeoutChecker == null) {
+            timeoutChecker = () -> false; // Default to no timeout
+        }
+
         return new Builder()
                 .state(state)
                 .depth(depth)

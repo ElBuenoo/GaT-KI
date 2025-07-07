@@ -16,7 +16,11 @@ public class Network {
     // Buffer size constants
     private static final int INITIAL_BUFFER_SIZE = 2048;
     private static final int MAX_BUFFER_SIZE = 8192;
-    private static final int SOCKET_TIMEOUT = 5000; // 5 seconds
+    private static final int SOCKET_TIMEOUT = 15000; // ERHÖHT von 5000 auf 15000 (15 Sekunden)
+
+    // Retry constants
+    private static final int MAX_SEND_RETRIES = 3;
+    private static final int RETRY_DELAY_MS = 500;
 
     public Network() {
         this.server = "game.guard-and-towers.com";
@@ -36,7 +40,6 @@ public class Network {
             byte[] buffer = new byte[INITIAL_BUFFER_SIZE];
             InputStream in = client.getInputStream();
 
-            // ✅ FIXED: Wrap Thread.sleep in try-catch
             try {
                 Thread.sleep(500);
             } catch (InterruptedException e) {
@@ -63,64 +66,91 @@ public class Network {
             return null;
         }
 
-        try {
-            // Send data to server
-            OutputStream out = client.getOutputStream();
-            byte[] dataBytes = data.getBytes(StandardCharsets.UTF_8);
-            out.write(dataBytes);
-            out.flush();
-
-            // Receive response with dynamic buffer sizing
-            InputStream in = client.getInputStream();
-
-            // Start with initial buffer
-            byte[] buffer = new byte[INITIAL_BUFFER_SIZE];
-            int totalBytesRead = 0;
-            int bytesRead;
-
-            // Read data in chunks to handle large responses
-            StringBuilder response = new StringBuilder();
-
-            // ✅ FIXED: Wrap Thread.sleep in try-catch
+        // VERBESSERUNG: Retry-Mechanismus
+        for (int attempt = 1; attempt <= MAX_SEND_RETRIES; attempt++) {
             try {
-                Thread.sleep(200); // Give server time to process
+                String response = sendInternal(data);
+                if (response != null) {
+                    return response;
+                }
+
+                System.err.println("Attempt " + attempt + " failed, no response");
+
+                if (attempt < MAX_SEND_RETRIES) {
+                    System.out.println("Retrying in " + RETRY_DELAY_MS + "ms...");
+                    Thread.sleep(RETRY_DELAY_MS);
+                }
+
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-            }
-
-            // First read
-            bytesRead = in.read(buffer);
-            if (bytesRead > 0) {
-                response.append(new String(buffer, 0, bytesRead, StandardCharsets.UTF_8));
-                totalBytesRead = bytesRead;
-
-                // Check if more data is available
-                while (in.available() > 0 && totalBytesRead < MAX_BUFFER_SIZE) {
-                    bytesRead = in.read(buffer);
-                    if (bytesRead > 0) {
-                        response.append(new String(buffer, 0, bytesRead, StandardCharsets.UTF_8));
-                        totalBytesRead += bytesRead;
-                    } else {
-                        break;
-                    }
+                break;
+            } catch (Exception e) {
+                System.err.println("Send attempt " + attempt + " error: " + e.getMessage());
+                if (attempt == MAX_SEND_RETRIES) {
+                    e.printStackTrace();
                 }
             }
+        }
 
-            if (totalBytesRead == 0) {
-                System.err.println("No data received in response");
-                return null;
+        return null;
+    }
+
+    private String sendInternal(String data) throws IOException {
+        // Send data to server
+        OutputStream out = client.getOutputStream();
+        byte[] dataBytes = data.getBytes(StandardCharsets.UTF_8);
+        out.write(dataBytes);
+        out.flush();
+
+        // Debug output
+        System.out.println("📤 Sent to server: " + data);
+
+        // Receive response with dynamic buffer sizing
+        InputStream in = client.getInputStream();
+
+        // Start with initial buffer
+        byte[] buffer = new byte[INITIAL_BUFFER_SIZE];
+        int totalBytesRead = 0;
+        int bytesRead;
+
+        // Read data in chunks to handle large responses
+        StringBuilder response = new StringBuilder();
+
+        try {
+            Thread.sleep(200); // Give server time to process
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // First read
+        bytesRead = in.read(buffer);
+        if (bytesRead > 0) {
+            response.append(new String(buffer, 0, bytesRead, StandardCharsets.UTF_8));
+            totalBytesRead = bytesRead;
+
+            // Check if more data is available
+            while (in.available() > 0 && totalBytesRead < MAX_BUFFER_SIZE) {
+                bytesRead = in.read(buffer);
+                if (bytesRead > 0) {
+                    response.append(new String(buffer, 0, bytesRead, StandardCharsets.UTF_8));
+                    totalBytesRead += bytesRead;
+                } else {
+                    break;
+                }
             }
+        }
 
-            return response.toString();
-
-        } catch (SocketTimeoutException e) {
-            System.err.println("Socket timeout while waiting for response");
-            return null;
-        } catch (IOException e) {
-            System.err.println("IO Error in send: " + e.getMessage());
-            e.printStackTrace();
+        if (totalBytesRead == 0) {
+            System.err.println("No data received in response");
             return null;
         }
+
+        String responseStr = response.toString();
+        System.out.println("📥 Received from server: " +
+                (responseStr.length() > 100 ?
+                        responseStr.substring(0, 100) + "..." : responseStr));
+
+        return responseStr;
     }
 
     /**
@@ -152,5 +182,6 @@ public class Network {
         System.out.println("  Player: " + playerNumber);
         System.out.println("  Connected: " + isConnected());
         System.out.println("  Timeout: " + SOCKET_TIMEOUT + "ms");
+        System.out.println("  Max retries: " + MAX_SEND_RETRIES);
     }
 }

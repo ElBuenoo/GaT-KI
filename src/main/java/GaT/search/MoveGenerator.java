@@ -1,139 +1,217 @@
 package GaT.search;
 
+import GaT.model.GameRules;
 import GaT.model.GameState;
 import GaT.model.Move;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Move generator for Guards & Towers
+ * FIXED VERSION - Always returns mutable ArrayList
+ */
 public class MoveGenerator {
+
+    /**
+     * Generate all legal moves for current position
+     * IMPORTANT: Returns mutable ArrayList for sorting
+     */
     public static List<Move> generateAllMoves(GameState state) {
-        List<Move> moves = new ArrayList<>();
+        // CRITICAL: Use ArrayList, not List.of() or ImmutableList
+        ArrayList<Move> moves = new ArrayList<>();
 
-        if (state.redToMove) {
-            generateGuardMoves(state.redGuard, state, true, moves);
-            generateTowerMoves(state.redTowers, state.redStackHeights, state, true, moves);
-        } else {
-            generateGuardMoves(state.blueGuard, state, false, moves);
-            generateTowerMoves(state.blueTowers, state.blueStackHeights, state, false, moves);
+        boolean isRed = state.redToMove;
+
+        // Generate moves for each piece
+        for (int from = 0; from < 49; from++) {
+            generateMovesFrom(state, from, isRed, moves);
         }
-        return moves;
+
+        return moves; // Return mutable ArrayList
     }
 
-    private static void generateGuardMoves(long guardBit, GameState state, boolean isRed, List<Move> moves) {
-        if (guardBit == 0) return; // Safety check - no guard exists
+    /**
+     * Generate moves from a specific square
+     */
+    private static void generateMovesFrom(GameState state, int from, boolean isRed, List<Move> moves) {
+        // Get piece count at square
+        int pieceCount = isRed ? state.redStackHeights[from] : state.blueStackHeights[from];
 
-        int from = Long.numberOfTrailingZeros(guardBit);
-        int[] directions = { -1, 1, -GameState.BOARD_SIZE, GameState.BOARD_SIZE }; // ← → ↑ ↓
+        if (pieceCount == 0) {
+            return; // No pieces to move
+        }
 
-        for (int dir : directions) {
-            int to = from + dir;
-            if (!GameState.isOnBoard(to)) continue;
+        // Check if it's a guard
+        boolean isGuard = isRed ?
+                (state.redGuard & (1L << from)) != 0 :
+                (state.blueGuard & (1L << from)) != 0;
 
-            // ✅ FIXED: Removed undefined 'check' variable, added proper direction parameter
-            boolean isHorizontal = (dir == -1 || dir == 1);
-            if (isHorizontal && isEdgeWrap(from, to, dir)) continue;
-
-            if (!isOccupied(to, state)) {
-                // Empty square - guard can move here
-                moves.add(new Move(from, to, 1));
-            } else if (isEnemyPiece(to, isRed, state)) {
-                // Enemy piece - guard can capture it
-                moves.add(new Move(from, to, 1));
+        // Generate moves for different amounts (1 to pieceCount)
+        for (int amount = 1; amount <= pieceCount; amount++) {
+            if (isGuard) {
+                // Guard moves
+                generateGuardMoves(state, from, amount, isRed, moves);
+            } else {
+                // Regular tower moves
+                generateTowerMoves(state, from, amount, isRed, moves);
             }
-            // Note: If it's our own piece, we don't add a move (can't move there)
         }
     }
 
-    private static void generateTowerMoves(long towers, int[] heights, GameState state, boolean isRed, List<Move> moves) {
-        for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            if (((towers >>> i) & 1) == 0) continue;
+    /**
+     * Generate guard moves
+     */
+    private static void generateGuardMoves(GameState state, int from, int amount, boolean isRed, List<Move> moves) {
+        int row = from / 7;
+        int col = from % 7;
 
-            int height = heights[i];
-            if (height == 0) continue;
+        // Guards can move to any adjacent square (8 directions)
+        int[] dRow = {-1, -1, -1, 0, 0, 1, 1, 1};
+        int[] dCol = {-1, 0, 1, -1, 1, -1, 0, 1};
 
-            int[] directions = { -1, 1, -GameState.BOARD_SIZE, GameState.BOARD_SIZE };
+        for (int i = 0; i < 8; i++) {
+            int newRow = row + dRow[i];
+            int newCol = col + dCol[i];
 
-            for (int amount = 1; amount <= height; amount++) {
-                for (int dir : directions) {
-                    int to = i + dir * amount;
-                    if (!GameState.isOnBoard(to)) continue;
+            if (isValidSquare(newRow, newCol)) {
+                int to = newRow * 7 + newCol;
 
-                    // Your fix was correct here
-                    if (isEdgeWrap(i, to, dir)) continue;
+                // Check if move is legal
+                if (isLegalMove(state, from, to, amount, isRed)) {
+                    moves.add(new Move(from, to, amount));
+                }
+            }
+        }
+    }
 
-                    if (isPathClear(i, dir, amount, state)) {
-                        if (!isOccupied(to, state)) {
-                            moves.add(new Move(i, to, amount));
-                        } else if (canCaptureTower(i, to, amount, isRed, state)) {
-                            moves.add(new Move(i, to, amount));
-                        } else if (isOwnTower(to, isRed, state)) {
-                            moves.add(new Move(i, to, amount)); // stacking
-                        }
+    /**
+     * Generate tower moves
+     */
+    private static void generateTowerMoves(GameState state, int from, int amount, boolean isRed, List<Move> moves) {
+        int row = from / 7;
+        int col = from % 7;
+
+        // Towers move in straight lines (4 directions)
+        int[] dRow = {-1, 0, 0, 1};
+        int[] dCol = {0, -1, 1, 0};
+
+        for (int dir = 0; dir < 4; dir++) {
+            // Try each distance
+            for (int dist = 1; dist < 7; dist++) {
+                int newRow = row + dRow[dir] * dist;
+                int newCol = col + dCol[dir] * dist;
+
+                if (!isValidSquare(newRow, newCol)) {
+                    break; // Out of bounds
+                }
+
+                int to = newRow * 7 + newCol;
+
+                // Check if square is occupied
+                if (state.redStackHeights[to] > 0 || state.blueStackHeights[to] > 0) {
+                    // Can capture if enemy piece
+                    if (isEnemyPiece(state, to, isRed) && isLegalMove(state, from, to, amount, isRed)) {
+                        moves.add(new Move(from, to, amount));
+                    }
+                    break; // Can't jump over pieces
+                } else {
+                    // Empty square - can move here
+                    if (isLegalMove(state, from, to, amount, isRed)) {
+                        moves.add(new Move(from, to, amount));
                     }
                 }
             }
         }
     }
 
-    private static boolean isEdgeWrap(int from, int to, int direction) {
-        // Only horizontal moves can wrap around board edges
-        if (Math.abs(direction) == 1) { // Horizontal movement (-1 or +1)
-            return GameState.rank(from) != GameState.rank(to);
-        }
-        return false; // Vertical moves (-7 or +7) cannot edge wrap
+    /**
+     * Check if square is valid
+     */
+    private static boolean isValidSquare(int row, int col) {
+        return row >= 0 && row < 7 && col >= 0 && col < 7;
     }
 
-
-    private static boolean isOccupied(int index, GameState state) {
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & GameState.bit(index)) != 0;
-    }
-
-    private static boolean isOwnTower(int index, boolean isRed, GameState state) {
-        return ((isRed ? state.redTowers : state.blueTowers) & GameState.bit(index)) != 0;
-    }
-
-    // ✅ NEW: Fixed method to check for enemy pieces (what you need for guard moves)
-    private static boolean isEnemyPiece(int index, boolean isRed, GameState state) {
-        long bit = GameState.bit(index);
+    /**
+     * Check if square contains enemy piece
+     */
+    private static boolean isEnemyPiece(GameState state, int square, boolean isRed) {
         if (isRed) {
-            // For red player, enemies are blue pieces
-            return (state.blueGuard & bit) != 0 || (state.blueTowers & bit) != 0;
+            return state.blueStackHeights[square] > 0;
         } else {
-            // For blue player, enemies are red pieces
-            return (state.redGuard & bit) != 0 || (state.redTowers & bit) != 0;
+            return state.redStackHeights[square] > 0;
         }
     }
 
-    private static boolean canCaptureGuard(int from, int to, boolean isRed, GameState state) {
-        long targetGuard = isRed ? state.blueGuard : state.redGuard;
-        return (targetGuard & GameState.bit(to)) != 0;
-    }
+    /**
+     * Check if move is legal according to game rules
+     */
+    private static boolean isLegalMove(GameState state, int from, int to, int amount, boolean isRed) {
+        // Basic validation
+        if (from == to) return false;
+        if (amount <= 0) return false;
 
-    private static boolean canCaptureTower(int from, int to, int amount, boolean isRed, GameState state) {
-        long enemyTowers = isRed ? state.blueTowers : state.redTowers;
-        int[] enemyHeights = isRed ? state.blueStackHeights : state.redStackHeights;
+        // Check piece ownership
+        int pieceCount = isRed ? state.redStackHeights[from] : state.blueStackHeights[from];
+        if (amount > pieceCount) return false;
 
-        // If there is a tower on target
-        if ((enemyTowers & GameState.bit(to)) != 0) {
-            return amount >= enemyHeights[to]; // tower height must be >= to capture
+        // Check target square
+        if (isRed && state.redStackHeights[to] > 0) {
+            return false; // Can't capture own pieces
+        }
+        if (!isRed && state.blueStackHeights[to] > 0) {
+            return false; // Can't capture own pieces
         }
 
-        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
-        return (enemyGuard & GameState.bit(to)) != 0; // any tower can capture guard
-    }
-
-    // ✅ FIXED: Your isPathClear was mostly correct, but let's make it more robust
-    private static boolean isPathClear(int from, int dir, int steps, GameState state) {
-        for (int i = 1; i < steps; i++) {
-            int check = from + dir * i;
-            if (!GameState.isOnBoard(check)) return false;
-            if (isOccupied(check, state)) return false;
-
-            // Check edge wrap for each step
-            if (isEdgeWrap(from, check, dir)) return false;
-        }
+        // Additional validation can be added here
         return true;
     }
 
-}
+    /**
+     * Generate only capture moves (for quiescence search)
+     * IMPORTANT: Returns mutable ArrayList
+     */
+    public static List<Move> generateCaptures(GameState state) {
+        ArrayList<Move> captures = new ArrayList<>();
+        List<Move> allMoves = generateAllMoves(state);
 
+        for (Move move : allMoves) {
+            if (GameRules.isCapture(move, state)) {
+                captures.add(move);
+            }
+        }
+
+        return captures;
+    }
+
+    /**
+     * Count legal moves (for mobility evaluation)
+     */
+    public static int countLegalMoves(GameState state) {
+        return generateAllMoves(state).size();
+    }
+
+    /**
+     * Check if any legal moves exist
+     */
+    public static boolean hasLegalMoves(GameState state) {
+        // Optimized version that returns early
+        boolean isRed = state.redToMove;
+
+        for (int from = 0; from < 49; from++) {
+            int pieceCount = isRed ? state.redStackHeights[from] : state.blueStackHeights[from];
+
+            if (pieceCount > 0) {
+                // Quick check for at least one move
+                List<Move> tempMoves = new ArrayList<>();
+                generateMovesFrom(state, from, isRed, tempMoves);
+
+                if (!tempMoves.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+}

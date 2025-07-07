@@ -102,8 +102,12 @@ public class PVSStrategy implements ISearchStrategy {
             }
         }
 
-        if (bestScore <= context.alpha || bestScore >= context.beta) {
-            throw new AspirationFailException();
+        // FIX: Nur bei echtem Aspiration Fail werfen
+        if (context.depth > 3 && (bestScore <= context.alpha || bestScore >= context.beta)) {
+            // Nur wenn wir ein reduziertes Window hatten
+            if (context.alpha > Integer.MIN_VALUE + 100 || context.beta < Integer.MAX_VALUE - 100) {
+                throw new AspirationFailException();
+            }
         }
 
         storeInTT(context, context.state.hash(), bestScore, context.alpha, beta, bestMove);
@@ -116,7 +120,7 @@ public class PVSStrategy implements ISearchStrategy {
     protected int pvSearch(SearchContext context, boolean isPVNode) {
         statistics.incrementNodeCount();
 
-        // FIX: Null-Check für timeoutChecker
+        // Timeout check
         if (context.timeoutChecker != null && context.timeoutChecker.getAsBoolean()) {
             throw new RuntimeException("Search timeout");
         }
@@ -182,6 +186,7 @@ public class PVSStrategy implements ISearchStrategy {
 
             statistics.addMovesSearched(1);
 
+            // FIX: score muss immer initialisiert werden
             int score;
 
             if (firstMove && isPVNode) {

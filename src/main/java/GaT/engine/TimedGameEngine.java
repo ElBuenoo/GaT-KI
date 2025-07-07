@@ -163,6 +163,7 @@ public class TimedGameEngine {
         Move bestMove = null;
         long[] depthTimes = new long[maxDepth + 1];
         int consecutiveFailures = 0;
+        int consecutiveNullResults = 0;
         long totalNodesSearched = 0;
 
         // Always search depth 1
@@ -182,6 +183,7 @@ public class TimedGameEngine {
 
         } catch (Exception e) {
             System.err.println("Error at depth 1: " + e.getMessage());
+            e.printStackTrace();
             return emergencySearchSimple(state);
         }
 
@@ -195,14 +197,14 @@ public class TimedGameEngine {
             long elapsed = System.currentTimeMillis() - searchStartTime;
             long remaining = timeMillis - elapsed;
 
-            // Time management
+            // Time management - more aggressive
             long expectedTime = predictNextDepthTime(depthTimes, depth);
 
-            // More conservative time management
-            if (expectedTime > remaining * 0.35 || remaining < 200) {
+            // Use more of available time (50% instead of 35%)
+            if (expectedTime > remaining * 0.5 || remaining < 150) {
                 System.out.println("Stopping at depth " + (depth-1) +
                         " (predicted " + expectedTime + "ms > " +
-                        (remaining * 0.35) + "ms available)");
+                        (remaining * 0.5) + "ms available)");
                 break;
             }
 
@@ -221,6 +223,7 @@ public class TimedGameEngine {
                     currentBestMove.set(bestMove);
                     lastValidMove.set(bestMove);
                     consecutiveFailures = 0;
+                    consecutiveNullResults = 0;
 
                     depthTimes[depth] = System.currentTimeMillis() - depthStart;
                     long nodesThisDepth = gameEngine.getStatistics().getTotalNodes();
@@ -237,10 +240,10 @@ public class TimedGameEngine {
                     }
                 } else {
                     System.err.println("Null move at depth " + depth);
-                    consecutiveFailures++;
+                    consecutiveNullResults++;
 
-                    if (consecutiveFailures >= 3) {
-                        System.err.println("Too many consecutive failures, stopping search");
+                    if (consecutiveNullResults >= 2) {
+                        System.err.println("Too many null results, stopping search");
                         break;
                     }
                 }
@@ -253,29 +256,49 @@ public class TimedGameEngine {
                     break;
                 }
 
-                System.err.println("Error at depth " + depth + ": " + errorMsg);
+                System.err.println("ERROR at depth " + depth + ": " + errorMsg);
 
-                // Don't print stack trace for every depth
-                if (debugMode || consecutiveFailures == 0) {
+                // VERBESSERTE FEHLERBEHANDLUNG
+                if (e instanceof NullPointerException) {
+                    System.err.println("NullPointerException detected!");
                     e.printStackTrace();
+
+                    // Bei NPE sofort abbrechen
+                    System.err.println("Stopping search due to NPE");
+                    break;
                 }
+
+                // Bei anderen Exceptions Stack Trace ausgeben
+                e.printStackTrace();
 
                 consecutiveFailures++;
 
-                // Stop if too many errors
-                if (consecutiveFailures >= 3) {
+                // Früher abbrechen bei wiederholten Fehlern
+                if (consecutiveFailures >= 2) {
                     System.err.println("Too many errors, stopping at depth " + (depth-1));
                     break;
                 }
 
-                // Continue with last valid move
+                // Falls wir einen gültigen Zug haben, fortfahren
                 if (lastValidMove.get() != null) {
                     depthTimes[depth] = System.currentTimeMillis() - depthStart;
+                } else {
+                    // Ohne gültigen Zug abbrechen
+                    System.err.println("No valid move available, stopping search");
+                    break;
                 }
             }
         }
 
         System.out.println("Search completed. Total nodes: " + totalNodesSearched);
+
+        // Debug-Info wenn keine Nodes durchsucht wurden
+        if (totalNodesSearched == 0 && debugMode) {
+            System.err.println("WARNING: No nodes searched!");
+            System.err.println("State: " + state);
+            System.err.println("Legal moves: " + MoveGenerator.generateAllMoves(state).size());
+        }
+
         return bestMove != null ? bestMove : lastValidMove.get();
     }
 
@@ -300,6 +323,7 @@ public class TimedGameEngine {
 
         } catch (Exception e) {
             System.err.println("Emergency search failed: " + e.getMessage());
+            e.printStackTrace();
         }
 
         return emergencySearchSimple(state);
@@ -336,6 +360,13 @@ public class TimedGameEngine {
     private long predictNextDepthTime(long[] depthTimes, int nextDepth) {
         if (nextDepth <= 1) return 50;
 
+        // For early depths, use more aggressive predictions
+        if (nextDepth <= 3) {
+            long lastTime = depthTimes[nextDepth - 1];
+            if (lastTime < 50) lastTime = 50;
+            return lastTime * 3; // Early depths usually don't branch as much
+        }
+
         // Calculate average branching factor
         double totalFactor = 0;
         int count = 0;
@@ -351,16 +382,25 @@ public class TimedGameEngine {
             }
         }
 
-        // Conservative default
-        double avgFactor = count > 0 ? totalFactor / count : 4.0;
+        // Less conservative default for Guards & Towers (smaller branching factor)
+        double avgFactor = count > 0 ? totalFactor / count : 2.5;
 
-        // Cap factor for safety
-        avgFactor = Math.min(avgFactor, 6.0);
+        // Cap factor based on depth
+        if (nextDepth < 5) {
+            avgFactor = Math.min(avgFactor, 3.0);
+        } else if (nextDepth < 10) {
+            avgFactor = Math.min(avgFactor, 4.0);
+        } else {
+            avgFactor = Math.min(avgFactor, 5.0);
+        }
 
         long lastTime = depthTimes[nextDepth - 1];
         if (lastTime < 10) lastTime = 50; // Minimum prediction
 
-        return (long)(lastTime * avgFactor * 1.3); // 30% safety margin
+        // Less conservative safety margin
+        double safetyMargin = nextDepth < 5 ? 1.1 : 1.2;
+
+        return (long)(lastTime * avgFactor * safetyMargin);
     }
 
     /**
