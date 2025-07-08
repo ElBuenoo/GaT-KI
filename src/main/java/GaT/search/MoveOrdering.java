@@ -1,11 +1,13 @@
 package GaT.search;
 
+import GaT.evaluation.StaticExchangeEvaluator;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.TTEntry;
 import GaT.model.SearchConfig;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -153,7 +155,7 @@ public class MoveOrdering {
      * Advanced move scoring with all heuristics
      */
     private int scoreMoveAdvanced(Move move, GameState state, int depth) {
-        int score = 0;
+        int score = scoreMoveAdvanced(move, state, depth);
 
         // 1. Winning moves (checkmate, castle capture)
         if (isWinningMove(move, state)) {
@@ -162,7 +164,13 @@ public class MoveOrdering {
 
         // 2. Captures with MVV-LVA
         else if (isCapture(move, state)) {
-            score += scoreCaptureMove(move, state);
+            int seeScore = StaticExchangeEvaluator.evaluateCapture(move, state);
+            score += seeScore / 2; // Weight SEE appropriately
+
+            // Penalty for bad captures
+            if (seeScore < 0) {
+                score -= 1000; // Strong penalty for losing material
+            }
         }
 
         // 3. PV move from previous iteration
@@ -396,11 +404,233 @@ public class MoveOrdering {
         return height * 25;
     }
 
+    /**
+     * STATIC EXCHANGE EVALUATION (SEE) - Critical for avoiding bad trades
+     *
+     * This replaces the calculateSEE() stub in MoveOrdering.java
+     * Add this method to your MoveOrdering class.
+     */
+
+    /**
+     * Calculate Static Exchange Evaluation for a capture move
+     * Returns the material gain/loss from the capture sequence
+     */
     private int calculateSEE(Move move, GameState state) {
-        // Simplified Static Exchange Evaluation
-        // TODO: Implement full SEE for better capture ordering
+        return StaticExchangeEvaluator.evaluateCapture(move, state);
+    }
+
+    /**
+     * Get all pieces defending a square, sorted by value (least valuable first)
+     */
+    private List<Integer> getDefenders(int square, GameState state, boolean defendingColor) {
+        List<Integer> defenders = new ArrayList<>();
+
+        // Check all squares for pieces that can defend
+        for (int from = 0; from < GameState.NUM_SQUARES; from++) {
+            if (canPieceAttackSquare(from, square, state, defendingColor)) {
+                int pieceValue = getPieceValueAt(from, state, defendingColor);
+                if (pieceValue > 0) {
+                    defenders.add(pieceValue);
+                }
+            }
+        }
+
+        // Sort by value (least valuable defenders first)
+        Collections.sort(defenders);
+        return defenders;
+    }
+
+    /**
+     * Get all pieces attacking a square, sorted by value
+     */
+    private List<Integer> getAttackers(int square, GameState state, boolean attackingColor) {
+        List<Integer> attackers = new ArrayList<>();
+
+        for (int from = 0; from < GameState.NUM_SQUARES; from++) {
+            if (canPieceAttackSquare(from, square, state, attackingColor)) {
+                int pieceValue = getPieceValueAt(from, state, attackingColor);
+                if (pieceValue > 0) {
+                    attackers.add(pieceValue);
+                }
+            }
+        }
+
+        Collections.sort(attackers);
+        return attackers;
+    }
+
+    /**
+     * Simulate the complete exchange sequence
+     */
+    private int simulateExchange(int square, int firstAttackerValue, int capturedValue,
+                                 List<Integer> defenders, GameState state, boolean redAttacking) {
+
+        List<Integer> attackers = getAttackers(square, state, redAttacking);
+
+        // Remove the first attacker (already moved)
+        if (!attackers.isEmpty() && attackers.get(0) == firstAttackerValue) {
+            attackers.remove(0);
+        }
+
+        // Exchange sequence: alternating captures
+        int materialBalance = capturedValue; // We captured something
+        int currentAttackerValue = firstAttackerValue; // This piece is now "hanging"
+        boolean redToCapture = !redAttacking; // Opponent's turn to recapture
+
+        while (true) {
+            List<Integer> currentSideAttackers = redToCapture ?
+                    getAttackers(square, state, true) : defenders;
+
+            if (currentSideAttackers.isEmpty()) {
+                // No more pieces can capture
+                break;
+            }
+
+            // Use the least valuable piece to recapture
+            int recapturingPieceValue = currentSideAttackers.get(0);
+            currentSideAttackers.remove(0);
+
+            if (redToCapture) {
+                materialBalance += currentAttackerValue; // Red gains the hanging piece
+            } else {
+                materialBalance -= currentAttackerValue; // Blue gains the hanging piece
+            }
+
+            // The recapturing piece is now hanging
+            currentAttackerValue = recapturingPieceValue;
+            redToCapture = !redToCapture;
+
+            // Check if the exchange should continue
+            // Stop if the side to move would lose material by continuing
+            int potentialGain = redToCapture ? currentAttackerValue : -currentAttackerValue;
+            if (potentialGain < 0) {
+                // Don't make a losing recapture
+                break;
+            }
+        }
+
+        return redAttacking ? materialBalance : -materialBalance;
+    }
+
+    /**
+     * Check if a piece at 'from' can attack 'to'
+     */
+    private boolean canPieceAttackSquare(int from, int to, GameState state, boolean isRed) {
+        if (from == to) return false;
+
+        // Check if there's a piece at 'from'
+        if (!hasPieceAt(from, state, isRed)) {
+            return false;
+        }
+
+        // Get piece type and movement range
+        boolean isGuard = isRed ?
+                (state.redGuard & GameState.bit(from)) != 0 :
+                (state.blueGuard & GameState.bit(from)) != 0;
+
+        int range = isGuard ? 1 :
+                (isRed ? state.redStackHeights[from] : state.blueStackHeights[from]);
+
+        if (range <= 0) return false;
+
+        // Check if target is in range and on same rank/file
+        int rankDiff = Math.abs(GameState.rank(from) - GameState.rank(to));
+        int fileDiff = Math.abs(GameState.file(from) - GameState.file(to));
+
+        // Must be on same rank or file
+        if (rankDiff != 0 && fileDiff != 0) return false;
+
+        int distance = Math.max(rankDiff, fileDiff);
+        if (distance > range) return false;
+
+        // Check if path is clear (for towers)
+        if (!isGuard && distance > 1) {
+            return isPathClearForAttack(from, to, state);
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if path is clear for tower attacks
+     */
+    private boolean isPathClearForAttack(int from, int to, GameState state) {
+        int rankDiff = GameState.rank(to) - GameState.rank(from);
+        int fileDiff = GameState.file(to) - GameState.file(from);
+
+        int step = rankDiff != 0 ? (rankDiff > 0 ? 7 : -7) : (fileDiff > 0 ? 1 : -1);
+        int current = from + step;
+
+        while (current != to) {
+            if (isOccupied(current, state)) {
+                return false;
+            }
+            current += step;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get piece value at a square
+     */
+    private int getPieceValueAt(int square, GameState state, boolean isRed) {
+        long bit = GameState.bit(square);
+
+        if (isRed) {
+            if ((state.redGuard & bit) != 0) {
+                return 800; // Guard value
+            }
+            if ((state.redTowers & bit) != 0) {
+                return state.redStackHeights[square] * 100; // Tower value by height
+            }
+        } else {
+            if ((state.blueGuard & bit) != 0) {
+                return 800; // Guard value
+            }
+            if ((state.blueTowers & bit) != 0) {
+                return state.blueStackHeights[square] * 100; // Tower value by height
+            }
+        }
+
         return 0;
     }
+
+    /**
+     * Get captured piece value
+     */
+    private int getCapturedPieceValue(int square, GameState state, boolean capturedColor) {
+        return getPieceValueAt(square, state, capturedColor);
+    }
+
+    /**
+     * Get attacker piece value
+     */
+    private int getAttackerPieceValue(int square, GameState state, boolean attackerColor) {
+        return getPieceValueAt(square, state, attackerColor);
+    }
+
+    /**
+     * Check if there's a piece of the given color at the square
+     */
+    private boolean hasPieceAt(int square, GameState state, boolean isRed) {
+        long bit = GameState.bit(square);
+        if (isRed) {
+            return (state.redGuard & bit) != 0 || (state.redTowers & bit) != 0;
+        } else {
+            return (state.blueGuard & bit) != 0 || (state.blueTowers & bit) != 0;
+        }
+    }
+
+    /**
+     * Check if square is occupied by any piece
+     */
+    private boolean isOccupied(int square, GameState state) {
+        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard)
+                & GameState.bit(square)) != 0;
+    }
+
+
 
     private int getGuardAdvancementBonus(Move move, GameState state) {
         boolean isRed = state.redToMove;

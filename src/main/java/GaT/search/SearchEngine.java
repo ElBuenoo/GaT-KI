@@ -26,6 +26,10 @@ public class SearchEngine {
     private final MoveOrdering moveOrdering;
     private final TranspositionTable transpositionTable;
     private final SearchStatistics statistics;
+    private boolean useNullMove = true;
+    private boolean useLMR = true;
+    private boolean useThreatDetection = true;
+
 
     // === SEARCH CONSTANTS ===
     private static final int CASTLE_REACH_SCORE = 2500;
@@ -109,28 +113,73 @@ public class SearchEngine {
 
     // === ALPHA-BETA SEARCH IMPLEMENTATION ===
 
-    private int alphaBetaSearch(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
+    private int alphaBetaSearch(GameState state, int depth, int alpha, int beta,
+                                        boolean maximizingPlayer, int moveNumber) {
         statistics.incrementNodeCount();
 
+        // Timeout check
         if (timeoutChecker != null && timeoutChecker.getAsBoolean()) {
             return evaluator.evaluate(state, depth);
         }
 
+        // Terminal check
         if (depth == 0 || isGameOver(state)) {
             return evaluator.evaluate(state, depth);
         }
 
+        // === NULL MOVE PRUNING ===
+        if (useNullMove && depth >= 3 && moveNumber > 0) {
+            NullMovePruning.NullMoveResult nullResult =
+                    NullMovePruning.tryNullMovePruning(state, depth, alpha, beta,
+                            maximizingPlayer, false, this);
+            if (nullResult.shouldPrune) {
+                return nullResult.score;
+            }
+        }
+
+        // === THREAT DETECTION ===
+        ThreatDetector.ThreatAnalysis threats = null;
+        if (useThreatDetection && depth >= 4) {
+            threats = ThreatDetector.quickThreatCheck(state);
+
+            // Extend search for critical threats
+            if (threats.hasCriticalThreats()) {
+                depth += 1;
+                System.out.println("🚨 Critical threat detected - extending search");
+            }
+        }
+
         List<Move> moves = MoveGenerator.generateAllMoves(state);
+
+        // === SEE FILTERING ===
+        // Filter out bad captures using SEE
+        moves = StaticExchangeEvaluator.filterBadCaptures(moves, state);
+
         moveOrdering.orderMoves(moves, state, depth, null);
 
         if (maximizingPlayer) {
             int maxEval = Integer.MIN_VALUE;
+            int currentMoveNumber = 0;
+
             for (Move move : moves) {
+                currentMoveNumber++;
+
                 if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
 
                 GameState copy = state.copy();
                 copy.applyMove(move);
-                int eval = alphaBetaSearch(copy, depth - 1, alpha, beta, false);
+
+                int eval;
+
+                // === LATE MOVE REDUCTIONS ===
+                if (useLMR && currentMoveNumber >= 4) {
+                    eval = LateMoveReductions.performLMRSearch(
+                            copy, move, depth - 1, alpha, beta, false, false,
+                            currentMoveNumber, this, SearchConfig.SearchStrategy.ALPHA_BETA);
+                } else {
+                    eval = alphaBetaSearch(copy, depth - 1, alpha, beta, false, currentMoveNumber);
+                }
+
                 maxEval = Math.max(maxEval, eval);
                 alpha = Math.max(alpha, eval);
 
@@ -141,13 +190,28 @@ public class SearchEngine {
             }
             return maxEval;
         } else {
+            // Similar implementation for minimizing player
             int minEval = Integer.MAX_VALUE;
+            int currentMoveNumber = 0;
+
             for (Move move : moves) {
+                currentMoveNumber++;
+
                 if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
 
                 GameState copy = state.copy();
                 copy.applyMove(move);
-                int eval = alphaBetaSearch(copy, depth - 1, alpha, beta, true);
+
+                int eval;
+
+                if (useLMR && currentMoveNumber >= 4) {
+                    eval = LateMoveReductions.performLMRSearch(
+                            copy, move, depth - 1, alpha, beta, true, false,
+                            currentMoveNumber, this, SearchConfig.SearchStrategy.ALPHA_BETA);
+                } else {
+                    eval = alphaBetaSearch(copy, depth - 1, alpha, beta, true, currentMoveNumber);
+                }
+
                 minEval = Math.min(minEval, eval);
                 beta = Math.min(beta, eval);
 

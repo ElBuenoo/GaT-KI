@@ -40,6 +40,7 @@ public class TacticalEvaluator extends Evaluator {
     public int evaluate(GameState state, int depth) {
         if (state == null) return 0;
 
+
         // Check for true game-ending positions
         int terminalScore = checkTerminalPosition(state, depth);
         if (Math.abs(terminalScore) >= CHECKMATE_SCORE) {
@@ -50,7 +51,23 @@ public class TacticalEvaluator extends Evaluator {
         GamePhase phase = detectGamePhase(state);
 
         // Phase-based evaluation
-        int eval = 0;
+        int eval = super.evaluate(state, depth);
+
+        // Add threat evaluation
+        if (depth >= 2) { // Only for deeper searches to avoid slowdown
+            ThreatDetector.ThreatAnalysis threats = ThreatDetector.quickThreatCheck(state);
+
+            if (threats.hasAnyThreats()) {
+                // Penalty for being under threat
+                int threatPenalty = state.redToMove ? threats.totalThreatScore : -threats.totalThreatScore;
+                eval -= threatPenalty / 4; // Weight appropriately
+
+                // Bonus for having defensive resources
+                if (!threats.defensiveMoves.isEmpty()) {
+                    eval += threats.defensiveMoves.size() * 25;
+                }
+            }
+        }
 
         switch (phase) {
             case OPENING:
