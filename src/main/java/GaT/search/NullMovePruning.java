@@ -380,4 +380,12 @@ public class NullMovePruning {
 
         return Math.min(reduction, depth - 1);
     }
+
+    public static boolean canUseNullMove(GameState state, int depth) {
+        return depth >= NULL_MOVE_MIN_DEPTH &&
+                !isZugzwangRisk(state) &&
+                !isInCheck(state);
+    }
+
+
 }

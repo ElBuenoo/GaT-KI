@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * STATIC EXCHANGE EVALUATION (SEE)
+ * STATIC EXCHANGE EVALUATION (SEE) - FIXED IMPLEMENTATION
  * Evaluates the outcome of a sequence of captures on a single square
  * to determine if a capture is profitable or leads to material loss.
  */
@@ -67,27 +67,19 @@ public class StaticExchangeEvaluator {
             }
         }
 
-        // If the least valuable attacker is more valuable than what it would capture, don't capture
-        if (bestAttacker.value > lastCapturedValue) {
-            return 0; // Stand pat
+        if (bestAttacker == null) {
+            return 0;
         }
 
-        // Simulate this capture
-        GameState copy = state.copy();
-        Move captureMove = new Move(bestAttacker.position, square, bestAttacker.moveAmount);
-        copy.applyMove(captureMove);
+        // Remove this attacker and simulate their capture
+        List<Attacker> remainingAttackers = new ArrayList<>(attackers);
+        remainingAttackers.remove(bestAttacker);
 
-        // Get remaining attackers after this capture
-        List<Attacker> remainingAttackers = getAllAttackers(copy, square);
+        // Add any x-ray attackers revealed by this move
+        remainingAttackers.addAll(getXRayAttackers(state, square, bestAttacker.position));
 
-        // Remove attackers from the same side as the one that just captured
-        remainingAttackers.removeIf(a -> a.isRed == bestAttacker.isRed);
-
-        // Recursive evaluation
-        int futureExchanges = simulateExchanges(copy, square, bestAttacker.value, remainingAttackers);
-
-        // Return value is what we capture minus what we lose in future
-        return lastCapturedValue - futureExchanges;
+        // Recursively calculate the exchange
+        return Math.max(0, lastCapturedValue - simulateExchanges(state, square, bestAttacker.value, remainingAttackers));
     }
 
     /**
@@ -96,7 +88,6 @@ public class StaticExchangeEvaluator {
     private static List<Attacker> getAllAttackers(GameState state, int targetSquare) {
         List<Attacker> attackers = new ArrayList<>();
 
-        // Check all squares for potential attackers
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
             // Red pieces
             if (state.redStackHeights[i] > 0) {
@@ -130,6 +121,53 @@ public class StaticExchangeEvaluator {
         }
 
         return attackers;
+    }
+
+    /**
+     * Get x-ray attackers revealed when a piece moves
+     */
+    private static List<Attacker> getXRayAttackers(GameState state, int targetSquare, int movedFrom) {
+        List<Attacker> xrayAttackers = new ArrayList<>();
+
+        // Check for pieces that could now attack through the square that was vacated
+        int rankTarget = GameState.rank(targetSquare);
+        int fileTarget = GameState.file(targetSquare);
+        int rankMoved = GameState.rank(movedFrom);
+        int fileMoved = GameState.file(movedFrom);
+
+        // Only check if the moved piece was blocking a potential line of attack
+        if (rankTarget == rankMoved || fileTarget == fileMoved) {
+            // Check all squares beyond the moved piece in the same line
+            for (int i = 0; i < GameState.NUM_SQUARES; i++) {
+                if (i == movedFrom || i == targetSquare) continue;
+
+                int rankCheck = GameState.rank(i);
+                int fileCheck = GameState.file(i);
+
+                // Check if this piece is on the same line and could attack through
+                if ((rankTarget == rankCheck && rankMoved == rankCheck) ||
+                        (fileTarget == fileCheck && fileMoved == fileCheck)) {
+
+                    // Check if there's a piece here that can attack
+                    if (state.redStackHeights[i] > 0 && canAttack(i, targetSquare, state.redStackHeights[i])) {
+                        xrayAttackers.add(new Attacker(i, TOWER_VALUE * state.redStackHeights[i],
+                                state.redStackHeights[i], true));
+                    }
+                    if (state.blueStackHeights[i] > 0 && canAttack(i, targetSquare, state.blueStackHeights[i])) {
+                        xrayAttackers.add(new Attacker(i, TOWER_VALUE * state.blueStackHeights[i],
+                                state.blueStackHeights[i], false));
+                    }
+                    if ((state.redGuard & GameState.bit(i)) != 0 && canAttack(i, targetSquare, 1)) {
+                        xrayAttackers.add(new Attacker(i, GUARD_VALUE, 1, true));
+                    }
+                    if ((state.blueGuard & GameState.bit(i)) != 0 && canAttack(i, targetSquare, 1)) {
+                        xrayAttackers.add(new Attacker(i, GUARD_VALUE, 1, false));
+                    }
+                }
+            }
+        }
+
+        return xrayAttackers;
     }
 
     /**
@@ -211,6 +249,19 @@ public class StaticExchangeEvaluator {
             this.value = value;
             this.moveAmount = moveAmount;
             this.isRed = isRed;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            Attacker attacker = (Attacker) obj;
+            return position == attacker.position && isRed == attacker.isRed;
+        }
+
+        @Override
+        public int hashCode() {
+            return position * 2 + (isRed ? 1 : 0);
         }
     }
 }

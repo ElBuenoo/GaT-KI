@@ -12,13 +12,8 @@ import java.util.List;
 import java.util.function.BooleanSupplier;
 
 /**
- * ENHANCED SEARCH ENGINE - With Null Move Pruning and Late Move Reductions
- *
- * NEW FEATURES:
- * ✅ 1. Null Move Pruning for tactical depth
- * ✅ 2. Late Move Reductions for search efficiency
- * ✅ 3. Static Exchange Evaluation integration
- * ✅ 4. Enhanced threat detection
+ * ENHANCED SEARCH ENGINE - COMPLETE FIXED IMPLEMENTATION
+ * With Null Move Pruning, Late Move Reductions, and proper integration
  */
 public class SearchEngine {
     // === DEPENDENCIES ===
@@ -90,14 +85,26 @@ public class SearchEngine {
             };
 
         } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("timeout")) {
+            // Handle timeout vs real errors
+            if (e.getMessage() != null &&
+                    (e.getMessage().contains("Timeout") ||
+                            e.getMessage().contains("timeout") ||
+                            e instanceof RuntimeException && e.getMessage().contains("Timeout"))) {
+
                 System.out.println("⏱️ Search timeout - using current best");
                 return evaluator.evaluate(state, depth);
+
             } else {
                 System.err.printf("❌ Real search error with %s: %s%n", strategy, e.getMessage());
+                if (strategy == SearchConfig.SearchStrategy.PVS_Q ||
+                        strategy == SearchConfig.SearchStrategy.PVS) {
+                    System.err.println("🔄 PVS failed, falling back to alpha-beta");
+                }
                 return alphaBetaSearchEnhanced(state, depth, alpha, beta, maximizingPlayer, true, 0);
             }
+
         } finally {
+            // Enhanced cleanup
             if (strategy == SearchConfig.SearchStrategy.PVS ||
                     strategy == SearchConfig.SearchStrategy.PVS_Q) {
                 PVSSearch.clearTimeoutChecker();
@@ -107,6 +114,9 @@ public class SearchEngine {
 
     // === ENHANCED ALPHA-BETA WITH NULL MOVE PRUNING & LMR ===
 
+    /**
+     * Enhanced Alpha-Beta with tactical improvements
+     */
     private int alphaBetaSearchEnhanced(GameState state, int depth, int alpha, int beta,
                                         boolean maximizingPlayer, boolean allowNull, int ply) {
         statistics.incrementNodeCount();
@@ -127,203 +137,108 @@ public class SearchEngine {
                 GameState nullState = state.copy();
                 nullState.redToMove = !nullState.redToMove;
 
-                int reduction = NULL_MOVE_REDUCTION;
-                if (depth > 6) reduction += 1; // Extra reduction for deeper searches
-
-                int nullScore = -alphaBetaSearchEnhanced(nullState, depth - reduction - 1,
+                int nullScore = -alphaBetaSearchEnhanced(nullState, depth - 1 - NULL_MOVE_REDUCTION,
                         -beta, -beta + 1, !maximizingPlayer, false, ply + 1);
 
-                if (nullScore >= beta) {
+                if ((maximizingPlayer && nullScore >= beta) || (!maximizingPlayer && nullScore <= alpha)) {
                     statistics.incrementNullMoveCutoffs();
-
-                    // Verification search for high depths to avoid zugzwang
-                    if (depth > 8) {
-                        int verifyScore = alphaBetaSearchEnhanced(state, depth - NULL_MOVE_VERIFICATION_REDUCTION - 1,
-                                beta - 1, beta, maximizingPlayer, false, ply + 1);
-                        if (verifyScore >= beta) {
-                            return beta;
-                        }
-                    } else {
-                        return beta;
-                    }
+                    return nullScore;
                 }
             }
         }
 
-        // Generate and order moves
+        // Generate moves
         List<Move> moves = MoveGenerator.generateAllMoves(state);
+        if (moves.isEmpty()) {
+            return evaluator.evaluate(state, depth); // Stalemate
+        }
+
+        // Move ordering
         TTEntry ttEntry = transpositionTable.get(state.hash());
         moveOrdering.orderMoves(moves, state, depth, ttEntry);
 
-        if (moves.isEmpty()) {
-            return evaluator.evaluate(state, depth);
-        }
-
-        int moveCount = 0;
-        int quietMoveCount = 0;
+        int bestScore = maximizingPlayer ? Integer.MIN_VALUE : Integer.MAX_VALUE;
         Move bestMove = null;
 
-        if (maximizingPlayer) {
-            int maxEval = Integer.MIN_VALUE;
+        for (int moveIndex = 0; moveIndex < moves.size(); moveIndex++) {
+            Move move = moves.get(moveIndex);
 
-            for (Move move : moves) {
-                if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
+            if (timeoutChecker != null && timeoutChecker.getAsBoolean()) {
+                break;
+            }
 
-                moveCount++;
-                boolean isQuiet = !isCapture(move, state) && !givesCheck(move, state);
-                if (isQuiet) quietMoveCount++;
+            GameState copy = state.copy();
+            copy.applyMove(move);
 
-                // === FUTILITY PRUNING ===
-                if (depth <= SearchConfig.FUTILITY_MAX_DEPTH && isQuiet && !isInCheck(state)) {
-                    int futilityValue = evaluator.evaluate(state, 0) + SearchConfig.FUTILITY_MARGINS[depth];
-                    if (futilityValue <= alpha) {
-                        statistics.incrementFutilityCutoffs();
-                        continue;
-                    }
-                }
+            int score;
+            boolean needsFullSearch = true;
 
-                // === SEE PRUNING ===
-                if (depth <= 3 && isCapture(move, state)) {
-                    if (!StaticExchangeEvaluator.isSafeCapture(state, move)) {
-                        continue; // Skip bad captures
-                    }
-                }
+            // === LATE MOVE REDUCTIONS ===
+            if (depth >= SearchConfig.LMR_MIN_DEPTH &&
+                    moveIndex >= SearchConfig.LMR_MIN_MOVE_COUNT &&
+                    !isCapture(move, state) && !givesCheck(move, state)) {
 
-                GameState copy = state.copy();
-                copy.applyMove(move);
+                int reduction = getLMRReduction(depth, moveIndex);
+                score = -alphaBetaSearchEnhanced(copy, depth - 1 - reduction, -beta, -alpha,
+                        !maximizingPlayer, true, ply + 1);
 
-                int eval;
-
-                // === LATE MOVE REDUCTIONS ===
-                if (depth >= SearchConfig.LMR_MIN_DEPTH &&
-                        moveCount > SearchConfig.LMR_MIN_MOVE_COUNT &&
-                        isQuiet && !isInCheck(copy)) {
-
-                    int reduction = getLMRReduction(depth, moveCount, isQuiet);
-
-                    // Reduced depth search
-                    eval = alphaBetaSearchEnhanced(copy, depth - 1 - reduction, alpha, beta,
-                            false, true, ply + 1);
-
-                    // Re-search at full depth if it exceeds alpha
-                    if (eval > alpha) {
-                        statistics.incrementLMRReductions();
-                        eval = alphaBetaSearchEnhanced(copy, depth - 1, alpha, beta,
-                                false, true, ply + 1);
-                    }
+                // Re-search if LMR move is good
+                if (score > alpha && score < beta) {
+                    needsFullSearch = true;
                 } else {
-                    // Normal search
-                    eval = alphaBetaSearchEnhanced(copy, depth - 1, alpha, beta, false, true, ply + 1);
+                    needsFullSearch = false;
                 }
+            }
 
-                if (eval > maxEval) {
-                    maxEval = eval;
+            // Full search
+            if (needsFullSearch) {
+                score = -alphaBetaSearchEnhanced(copy, depth - 1, -beta, -alpha,
+                        !maximizingPlayer, true, ply + 1);
+            }
+
+            if (maximizingPlayer) {
+                if (score > bestScore) {
+                    bestScore = score;
                     bestMove = move;
                 }
-
-                alpha = Math.max(alpha, eval);
-
+                alpha = Math.max(alpha, score);
                 if (beta <= alpha) {
                     statistics.incrementAlphaBetaCutoffs();
-
-                    // Update killer moves and history for quiet moves
-                    if (isQuiet) {
+                    if (!isCapture(move, state)) {
                         moveOrdering.storeKillerMove(move, depth);
-                        moveOrdering.updateHistory(move, depth);
+                    }
+                    break;
+                }
+            } else {
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestMove = move;
+                }
+                beta = Math.min(beta, score);
+                if (beta <= alpha) {
+                    statistics.incrementAlphaBetaCutoffs();
+                    if (!isCapture(move, state)) {
+                        moveOrdering.storeKillerMove(move, depth);
                     }
                     break;
                 }
             }
-
-            // Store in transposition table
-            if (bestMove != null) {
-                int flag = maxEval >= beta ? TTEntry.LOWER_BOUND :
-                        maxEval <= alpha ? TTEntry.UPPER_BOUND : TTEntry.EXACT;
-                transpositionTable.put(state.hash(), new TTEntry(maxEval, depth, flag, bestMove));
-            }
-
-            return maxEval;
-
-        } else {
-            // Minimizing player (similar structure with inverted logic)
-            int minEval = Integer.MAX_VALUE;
-
-            for (Move move : moves) {
-                if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
-
-                moveCount++;
-                boolean isQuiet = !isCapture(move, state) && !givesCheck(move, state);
-                if (isQuiet) quietMoveCount++;
-
-                // === FUTILITY PRUNING ===
-                if (depth <= SearchConfig.FUTILITY_MAX_DEPTH && isQuiet && !isInCheck(state)) {
-                    int futilityValue = evaluator.evaluate(state, 0) - SearchConfig.FUTILITY_MARGINS[depth];
-                    if (futilityValue >= beta) {
-                        statistics.incrementFutilityCutoffs();
-                        continue;
-                    }
-                }
-
-                // === SEE PRUNING ===
-                if (depth <= 3 && isCapture(move, state)) {
-                    if (!StaticExchangeEvaluator.isSafeCapture(state, move)) {
-                        continue;
-                    }
-                }
-
-                GameState copy = state.copy();
-                copy.applyMove(move);
-
-                int eval;
-
-                // === LATE MOVE REDUCTIONS ===
-                if (depth >= SearchConfig.LMR_MIN_DEPTH &&
-                        moveCount > SearchConfig.LMR_MIN_MOVE_COUNT &&
-                        isQuiet && !isInCheck(copy)) {
-
-                    int reduction = getLMRReduction(depth, moveCount, isQuiet);
-
-                    eval = alphaBetaSearchEnhanced(copy, depth - 1 - reduction, alpha, beta,
-                            true, true, ply + 1);
-
-                    if (eval < beta) {
-                        statistics.incrementLMRReductions();
-                        eval = alphaBetaSearchEnhanced(copy, depth - 1, alpha, beta,
-                                true, true, ply + 1);
-                    }
-                } else {
-                    eval = alphaBetaSearchEnhanced(copy, depth - 1, alpha, beta, true, true, ply + 1);
-                }
-
-                if (eval < minEval) {
-                    minEval = eval;
-                    bestMove = move;
-                }
-
-                beta = Math.min(beta, eval);
-
-                if (beta <= alpha) {
-                    statistics.incrementAlphaBetaCutoffs();
-
-                    if (isQuiet) {
-                        moveOrdering.storeKillerMove(move, depth);
-                        moveOrdering.updateHistory(move, depth);
-                    }
-                    break;
-                }
-            }
-
-            // Store in transposition table
-            if (bestMove != null) {
-                int flag = minEval <= alpha ? TTEntry.UPPER_BOUND :
-                        minEval >= beta ? TTEntry.LOWER_BOUND : TTEntry.EXACT;
-                transpositionTable.put(state.hash(), new TTEntry(minEval, depth, flag, bestMove));
-            }
-
-            return minEval;
         }
+
+        // Store in transposition table
+        if (bestMove != null) {
+            TTEntry entry = new TTEntry(bestScore, depth, bestMove,
+                    bestScore <= alpha ? TTEntry.UPPER_BOUND :
+                            bestScore >= beta ? TTEntry.LOWER_BOUND : TTEntry.EXACT);
+            transpositionTable.put(state.hash(), entry);
+        }
+
+        return bestScore;
     }
 
+    /**
+     * Enhanced Alpha-Beta with Quiescence
+     */
     private int alphaBetaWithQuiescenceEnhanced(GameState state, int depth, int alpha, int beta,
                                                 boolean maximizingPlayer, boolean allowNull, int ply) {
         if (depth <= 0) {
@@ -332,20 +247,111 @@ public class SearchEngine {
         return alphaBetaSearchEnhanced(state, depth, alpha, beta, maximizingPlayer, allowNull, ply);
     }
 
+    // === BASIC ALPHA-BETA (FALLBACK) ===
+
+    /**
+     * Basic alpha-beta search (fallback implementation)
+     */
+    private int alphaBetaSearch(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
+        statistics.incrementNodeCount();
+
+        if (timeoutChecker != null && timeoutChecker.getAsBoolean()) {
+            return evaluator.evaluate(state, depth);
+        }
+
+        if (depth == 0 || isGameOver(state)) {
+            return evaluator.evaluate(state, depth);
+        }
+
+        List<Move> moves = MoveGenerator.generateAllMoves(state);
+        moveOrdering.orderMoves(moves, state, depth, null);
+
+        if (maximizingPlayer) {
+            int maxEval = Integer.MIN_VALUE;
+            for (Move move : moves) {
+                if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
+
+                GameState copy = state.copy();
+                copy.applyMove(move);
+                int eval = alphaBetaSearch(copy, depth - 1, alpha, beta, false);
+                maxEval = Math.max(maxEval, eval);
+                alpha = Math.max(alpha, eval);
+
+                if (beta <= alpha) {
+                    statistics.incrementAlphaBetaCutoffs();
+                    break;
+                }
+            }
+            return maxEval;
+        } else {
+            int minEval = Integer.MAX_VALUE;
+            for (Move move : moves) {
+                if (timeoutChecker != null && timeoutChecker.getAsBoolean()) break;
+
+                GameState copy = state.copy();
+                copy.applyMove(move);
+                int eval = alphaBetaSearch(copy, depth - 1, alpha, beta, true);
+                minEval = Math.min(minEval, eval);
+                beta = Math.min(beta, eval);
+
+                if (beta <= alpha) {
+                    statistics.incrementAlphaBetaCutoffs();
+                    break;
+                }
+            }
+            return minEval;
+        }
+    }
+
+    /**
+     * Alpha-beta with quiescence fallback
+     */
+    private int alphaBetaWithQuiescence(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
+        if (depth <= 0) {
+            return QuiescenceSearch.quiesce(state, alpha, beta, maximizingPlayer, 0);
+        }
+        return alphaBetaSearch(state, depth, alpha, beta, maximizingPlayer);
+    }
+
     // === HELPER METHODS ===
 
     /**
-     * Check if we can do null move (have pieces to move)
+     * Check if game is over
+     */
+    private boolean isGameOver(GameState state) {
+        List<Move> moves = MoveGenerator.generateAllMoves(state);
+        if (moves.isEmpty()) {
+            return true;
+        }
+
+        // Check for guard captures/castle reaches
+        boolean isRed = state.redToMove;
+        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
+        long ownGuard = isRed ? state.redGuard : state.blueGuard;
+
+        return enemyGuard == 0 || ownGuard == 0;
+    }
+
+    /**
+     * Check if position is in check (simplified)
+     */
+    private boolean isInCheck(GameState state) {
+        ThreatDetector.ThreatAnalysis threats = ThreatDetector.analyzeThreats(state);
+        return threats.inCheck;
+    }
+
+    /**
+     * Check if null move is safe
      */
     private boolean canDoNullMove(GameState state) {
-        // Don't do null move if we have very few pieces
+        // Don't null move in endgame or when few pieces
         int pieceCount = 0;
 
         if (state.redToMove) {
             for (int i = 0; i < GameState.NUM_SQUARES; i++) {
                 pieceCount += state.redStackHeights[i];
             }
-            return pieceCount >= 3; // Need at least 3 tower pieces
+            return pieceCount >= 3;
         } else {
             for (int i = 0; i < GameState.NUM_SQUARES; i++) {
                 pieceCount += state.blueStackHeights[i];
@@ -355,14 +361,15 @@ public class SearchEngine {
     }
 
     /**
-     * Check if current side is in check
+     * Check if move is a capture
      */
-    private boolean isInCheck(GameState state) {
-        return ThreatDetector.analyzeThreats(state).inCheck;
+    private boolean isCapture(Move move, GameState state) {
+        long toBit = GameState.bit(move.to);
+        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
     }
 
     /**
-     * Check if move gives check
+     * Check if move gives check (simplified)
      */
     private boolean givesCheck(Move move, GameState state) {
         GameState copy = state.copy();
@@ -371,62 +378,43 @@ public class SearchEngine {
     }
 
     /**
-     * Calculate LMR reduction amount
+     * Get LMR reduction amount
      */
-    private int getLMRReduction(int depth, int moveCount, boolean isQuiet) {
-        if (depth < 3 || moveCount < 4) return 0;
+    private int getLMRReduction(int depth, int moveIndex) {
+        if (depth < 3 || moveIndex < 4) return 0;
 
-        // Use pre-calculated table
-        int tableReduction = LMR_TABLE[Math.min(depth, 63)][Math.min(moveCount, 63)];
-
-        // Adjust based on move characteristics
-        int reduction = tableReduction;
-
-        // Less reduction for captures that passed SEE
-        if (!isQuiet) {
-            reduction = reduction * 2 / 3;
-        }
-
-        // Ensure we don't reduce too much
-        reduction = Math.min(reduction, depth - 2);
-
-        return Math.max(0, reduction);
-    }
-
-    private boolean isGameOver(GameState state) {
-        List<Move> moves = MoveGenerator.generateAllMoves(state);
-        if (moves.isEmpty()) {
-            return true;
-        }
-
-        boolean isRed = state.redToMove;
-        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
-        long ownGuard = isRed ? state.redGuard : state.blueGuard;
-
-        return enemyGuard == 0 || ownGuard == 0;
-    }
-
-    private boolean isCapture(Move move, GameState state) {
-        long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
+        int tableReduction = LMR_TABLE[Math.min(depth, 63)][Math.min(moveIndex, 63)];
+        return Math.min(tableReduction, depth - 2);
     }
 
     // === TIMEOUT MANAGEMENT ===
 
+    /**
+     * Set timeout checker
+     */
     public void setTimeoutChecker(BooleanSupplier checker) {
         this.timeoutChecker = checker;
     }
 
+    /**
+     * Clear timeout checker
+     */
     public void clearTimeoutChecker() {
         this.timeoutChecker = null;
     }
 
     // === SEARCH OVERLOADS ===
 
+    /**
+     * Search with default strategy
+     */
     public int search(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
         return search(state, depth, alpha, beta, maximizingPlayer, SearchConfig.DEFAULT_STRATEGY);
     }
 
+    /**
+     * Search with timeout
+     */
     public int searchWithTimeout(GameState state, int depth, int alpha, int beta,
                                  boolean maximizingPlayer, SearchConfig.SearchStrategy strategy,
                                  BooleanSupplier timeoutCheck) {
@@ -440,7 +428,28 @@ public class SearchEngine {
 
     // === EVALUATION DELEGATE ===
 
+    /**
+     * Direct evaluation access
+     */
     public int evaluate(GameState state, int depth) {
         return evaluator.evaluate(state, depth);
+    }
+
+    // === COMPONENT ACCESS ===
+
+    public Evaluator getEvaluator() {
+        return evaluator;
+    }
+
+    public MoveOrdering getMoveOrdering() {
+        return moveOrdering;
+    }
+
+    public TranspositionTable getTranspositionTable() {
+        return transpositionTable;
+    }
+
+    public SearchStatistics getStatistics() {
+        return statistics;
     }
 }

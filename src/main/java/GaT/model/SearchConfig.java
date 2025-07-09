@@ -62,6 +62,93 @@ public class SearchConfig {
     public static final int TABLEBASE_MATERIAL_THRESHOLD = 6;
     public static final int TACTICAL_COMPLEXITY_THRESHOLD = 3;
 
+// === LATE MOVE REDUCTION CONSTANTS ===
+
+    /** Minimum number of moves searched before applying LMR */
+    public static final int LMR_MIN_MOVES_SEARCHED = 4;
+
+    /** Maximum LMR reduction depth */
+    public static final int LMR_MAX_REDUCTION = 3;
+
+    /** LMR reduction factor for quiet moves */
+    public static final double LMR_QUIET_REDUCTION_FACTOR = 0.75;
+
+    /** LMR reduction factor for tactical moves */
+    public static final double LMR_TACTICAL_REDUCTION_FACTOR = 0.5;
+
+// === SEARCH WINDOW CONSTANTS ===
+
+    /** Initial aspiration window size */
+    public static final int ASPIRATION_INITIAL_WINDOW = 25;
+
+    /** Maximum aspiration window failures before full window search */
+    public static final int ASPIRATION_MAX_FAILURES = 4;
+
+    /** Factor to widen aspiration window after failure */
+    public static final int ASPIRATION_WIDEN_FACTOR = 2;
+
+// === TIME MANAGEMENT CONSTANTS ===
+
+    /** Percentage of time to use for normal moves */
+    public static final double NORMAL_TIME_PERCENTAGE = 0.04;
+
+    /** Percentage of time to use for critical moves */
+    public static final double CRITICAL_TIME_PERCENTAGE = 0.20;
+
+    /** Emergency time reserve percentage */
+    public static final double EMERGENCY_TIME_PERCENTAGE = 0.10;
+
+    /** Complexity factor for time allocation */
+    public static final double COMPLEXITY_TIME_FACTOR = 1.5;
+
+// === THREAT DETECTION CONSTANTS ===
+
+    /** Minimum threat level to trigger defensive mode */
+    public static final int DEFENSIVE_MODE_THREAT_LEVEL = 7;
+
+    /** Maximum threats to analyze per position */
+    public static final int MAX_THREATS_ANALYZED = 10;
+
+    /** Threat evaluation cache size */
+    public static final int THREAT_CACHE_SIZE = 1000;
+
+// === SEE (Static Exchange Evaluation) CONSTANTS ===
+
+    /** Minimum SEE value to consider capture worthwhile */
+    public static final int SEE_MINIMUM_GAIN = 0;
+
+    /** SEE piece values */
+    public static final int SEE_TOWER_VALUE = 100;
+    public static final int SEE_GUARD_VALUE = 2000;
+
+    /** Maximum SEE calculation depth */
+    public static final int SEE_MAX_DEPTH = 16;
+
+// === DEBUGGING AND TUNING FLAGS ===
+
+    /** Enable detailed search debugging output */
+    public static final boolean DEBUG_SEARCH = false;
+
+    /** Enable move ordering statistics */
+    public static final boolean DEBUG_MOVE_ORDERING = false;
+
+    /** Enable pruning statistics */
+    public static final boolean DEBUG_PRUNING = false;
+
+    /** Enable threat detection debugging */
+    public static final boolean DEBUG_THREATS = false;
+
+// === POSITION ANALYSIS CONSTANTS ===
+
+    /** Minimum piece count for middlegame */
+    public static final int MIDDLEGAME_PIECE_THRESHOLD = 12;
+
+    /** Maximum piece count for endgame special handling */
+    public static final int ENDGAME_PIECE_THRESHOLD = 8;
+
+    /** Complexity threshold for extended time usage */
+    public static final int POSITION_COMPLEXITY_THRESHOLD = 5;
+
     // === SEARCH STRATEGY CONFIGURATION ===
     public enum SearchStrategy {
         ALPHA_BETA("Alpha-Beta"),
