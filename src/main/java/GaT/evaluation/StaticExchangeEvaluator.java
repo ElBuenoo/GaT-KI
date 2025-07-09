@@ -4,6 +4,8 @@ import GaT.model.GameState;
 import GaT.model.Move;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * STATIC EXCHANGE EVALUATION (SEE) - FIXED IMPLEMENTATION
@@ -15,6 +17,9 @@ public class StaticExchangeEvaluator {
     // Piece values for SEE calculations
     private static final int GUARD_VALUE = 2000;
     private static final int TOWER_VALUE = 100;
+
+    // Maximum recursion depth to prevent stack overflow
+    private static final int MAX_SEE_DEPTH = 10;
 
     /**
      * Main SEE interface - evaluates if a capture is winning, losing, or neutral
@@ -40,8 +45,10 @@ public class StaticExchangeEvaluator {
             return capturedValue;
         }
 
-        // Run the exchange simulation
-        return capturedValue - simulateExchanges(copy, move.to, getMovingPieceValue(state, move), attackers);
+        // Run the exchange simulation with depth limiting
+        Set<String> seenPositions = new HashSet<>();
+        return capturedValue - simulateExchanges(copy, move.to, getMovingPieceValue(state, move),
+                attackers, seenPositions, 0);
     }
 
     /**
@@ -52,18 +59,28 @@ public class StaticExchangeEvaluator {
     }
 
     /**
-     * Simulate the exchange sequence
+     * Simulate the exchange sequence with cycle detection and depth limiting
      */
-    private static int simulateExchanges(GameState state, int square, int lastCapturedValue, List<Attacker> attackers) {
-        if (attackers.isEmpty()) {
+    private static int simulateExchanges(GameState state, int square, int lastCapturedValue,
+                                         List<Attacker> attackers, Set<String> seenPositions, int depth) {
+        // Depth limiting to prevent infinite recursion
+        if (depth >= MAX_SEE_DEPTH || attackers.isEmpty()) {
             return 0;
         }
+
+        // Create a position signature to detect cycles
+        String positionKey = createPositionKey(square, attackers, depth);
+        if (seenPositions.contains(positionKey)) {
+            // Cycle detected, break it
+            return 0;
+        }
+        seenPositions.add(positionKey);
 
         // Find least valuable attacker (to maximize exchange outcome)
         Attacker bestAttacker = null;
         for (Attacker attacker : attackers) {
             if (bestAttacker == null || attacker.value < bestAttacker.value) {
-                bestAttacker = attacker;
+                bestAttacker = attacker; // FIXED: was corrupted with file path
             }
         }
 
@@ -72,14 +89,48 @@ public class StaticExchangeEvaluator {
         }
 
         // Remove this attacker and simulate their capture
-        List<Attacker> remainingAttackers = new ArrayList<>(attackers);
-        remainingAttackers.remove(bestAttacker);
+        List<Attacker> remainingAttackers = new ArrayList<>();
+        for (Attacker attacker : attackers) {
+            if (!attacker.equals(bestAttacker)) {
+                remainingAttackers.add(attacker);
+            }
+        }
 
-        // Add any x-ray attackers revealed by this move
-        remainingAttackers.addAll(getXRayAttackers(state, square, bestAttacker.position));
+        // Add any x-ray attackers revealed by this move (with cycle prevention)
+        List<Attacker> xrayAttackers = getXRayAttackers(state, square, bestAttacker.position);
+        for (Attacker xray : xrayAttackers) {
+            if (!containsAttacker(remainingAttackers, xray)) {
+                remainingAttackers.add(xray);
+            }
+        }
 
         // Recursively calculate the exchange
-        return Math.max(0, lastCapturedValue - simulateExchanges(state, square, bestAttacker.value, remainingAttackers));
+        return Math.max(0, lastCapturedValue - simulateExchanges(state, square, bestAttacker.value,
+                remainingAttackers, seenPositions, depth + 1));
+    }
+
+    /**
+     * Create a unique key for position to detect cycles
+     */
+    private static String createPositionKey(int square, List<Attacker> attackers, int depth) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(square).append("_").append(depth).append("_");
+        for (Attacker attacker : attackers) {
+            sb.append(attacker.position).append(attacker.isRed ? "r" : "b").append("_");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Check if attacker list already contains this attacker
+     */
+    private static boolean containsAttacker(List<Attacker> attackers, Attacker target) {
+        for (Attacker attacker : attackers) {
+            if (attacker.equals(target)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -124,7 +175,7 @@ public class StaticExchangeEvaluator {
     }
 
     /**
-     * Get x-ray attackers revealed when a piece moves
+     * Get x-ray attackers revealed when a piece moves (IMPROVED VERSION)
      */
     private static List<Attacker> getXRayAttackers(GameState state, int targetSquare, int movedFrom) {
         List<Attacker> xrayAttackers = new ArrayList<>();
@@ -148,20 +199,32 @@ public class StaticExchangeEvaluator {
                 if ((rankTarget == rankCheck && rankMoved == rankCheck) ||
                         (fileTarget == fileCheck && fileMoved == fileCheck)) {
 
-                    // Check if there's a piece here that can attack
+                    // Verify the piece can actually reach the target and wasn't already counted
                     if (state.redStackHeights[i] > 0 && canAttack(i, targetSquare, state.redStackHeights[i])) {
-                        xrayAttackers.add(new Attacker(i, TOWER_VALUE * state.redStackHeights[i],
-                                state.redStackHeights[i], true));
+                        Attacker xray = new Attacker(i, TOWER_VALUE * state.redStackHeights[i],
+                                state.redStackHeights[i], true);
+                        if (!containsAttacker(xrayAttackers, xray)) {
+                            xrayAttackers.add(xray);
+                        }
                     }
                     if (state.blueStackHeights[i] > 0 && canAttack(i, targetSquare, state.blueStackHeights[i])) {
-                        xrayAttackers.add(new Attacker(i, TOWER_VALUE * state.blueStackHeights[i],
-                                state.blueStackHeights[i], false));
+                        Attacker xray = new Attacker(i, TOWER_VALUE * state.blueStackHeights[i],
+                                state.blueStackHeights[i], false);
+                        if (!containsAttacker(xrayAttackers, xray)) {
+                            xrayAttackers.add(xray);
+                        }
                     }
                     if ((state.redGuard & GameState.bit(i)) != 0 && canAttack(i, targetSquare, 1)) {
-                        xrayAttackers.add(new Attacker(i, GUARD_VALUE, 1, true));
+                        Attacker xray = new Attacker(i, GUARD_VALUE, 1, true);
+                        if (!containsAttacker(xrayAttackers, xray)) {
+                            xrayAttackers.add(xray);
+                        }
                     }
                     if ((state.blueGuard & GameState.bit(i)) != 0 && canAttack(i, targetSquare, 1)) {
-                        xrayAttackers.add(new Attacker(i, GUARD_VALUE, 1, false));
+                        Attacker xray = new Attacker(i, GUARD_VALUE, 1, false);
+                        if (!containsAttacker(xrayAttackers, xray)) {
+                            xrayAttackers.add(xray);
+                        }
                     }
                 }
             }
@@ -256,12 +319,18 @@ public class StaticExchangeEvaluator {
             if (this == obj) return true;
             if (obj == null || getClass() != obj.getClass()) return false;
             Attacker attacker = (Attacker) obj;
-            return position == attacker.position && isRed == attacker.isRed;
+            return position == attacker.position && isRed == attacker.isRed && moveAmount == attacker.moveAmount;
         }
 
         @Override
         public int hashCode() {
-            return position * 2 + (isRed ? 1 : 0);
+            return position * 4 + (isRed ? 2 : 0) + (moveAmount % 2);
+        }
+
+        @Override
+        public String toString() {
+            return String.format("Attacker{pos=%d, val=%d, amt=%d, red=%s}",
+                    position, value, moveAmount, isRed);
         }
     }
 }

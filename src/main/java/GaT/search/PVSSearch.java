@@ -233,11 +233,164 @@ public class PVSSearch {
      */
     public static int searchWithQuiescence(GameState state, int depth, int alpha, int beta,
                                            boolean maximizingPlayer, boolean isPVNode) {
+
+        statistics.incrementNodeCount(); // FIXED: Proper node counting
+
+        // PHASE 1 FIX: Graceful timeout - don't throw immediately
+        if (timeoutChecker != null && timeoutChecker.getAsBoolean()) {
+            searchInterrupted = true;
+            // Return evaluation instead of throwing
+            return Minimax.evaluate(state, depth);
+        }
+
+        // Check if search was interrupted previously
+        if (searchInterrupted) {
+            return Minimax.evaluate(state, depth);
+        }
+
+        // TT-Lookup with PV node caution
+        long hash = state.hash();
+        TTEntry entry = Minimax.getTranspositionEntry(hash);
+        if (entry != null && entry.depth >= depth) {
+            statistics.incrementTTHits(); // FIXED: Count TT hits
+
+            if (entry.flag == TTEntry.EXACT && (!isPVNode || depth <= 0)) {
+                return entry.score;
+            } else if (!isPVNode) {
+                if (entry.flag == TTEntry.LOWER_BOUND && entry.score >= beta) {
+                    return entry.score;
+                } else if (entry.flag == TTEntry.UPPER_BOUND && entry.score <= alpha) {
+                    return entry.score;
+                }
+            }
+        } else {
+            statistics.incrementTTMisses(); // FIXED: Count TT misses
+        }
+
+        // Terminal conditions
+        if (Minimax.isGameOver(state)) {
+            statistics.incrementLeafNodeCount(); // FIXED: Count leaf nodes
+            return Minimax.evaluate(state, depth);
+        }
+
+        // Quiescence Search when depth exhausted - FIXED: Remove redundant counting
         if (depth <= 0) {
+            // FIXED: Don't increment Q-node count here, QuiescenceSearch will handle it
             return QuiescenceSearch.quiesce(state, alpha, beta, maximizingPlayer, 0);
         }
 
-        return search(state, depth, alpha, beta, maximizingPlayer, isPVNode);
+        // === NORMAL PVS SEARCH ===
+        List<Move> moves = MoveGenerator.generateAllMoves(state);
+        if (moves.isEmpty()) {
+            statistics.incrementLeafNodeCount();
+            return Minimax.evaluate(state, depth);
+        }
+
+        // Move ordering with TT move hint
+        Move ttMove = (entry != null) ? entry.bestMove : null;
+        moveOrdering.orderMoves(moves, state, depth, entry);
+
+        int originalAlpha = alpha;
+        boolean isFirstMove = true;
+        Move bestMove = null;
+
+        if (maximizingPlayer) {
+            // === MAXIMIZING PLAYER ===
+            int maxEval = Integer.MIN_VALUE;
+
+            for (int i = 0; i < moves.size(); i++) {
+                // PHASE 1 FIX: Periodic interruption checks
+                if (i % 3 == 0 && searchInterrupted) {
+                    break; // Exit gracefully
+                }
+
+                Move move = moves.get(i);
+                GameState copy = state.copy();
+                copy.applyMove(move);
+                statistics.addMovesSearched(1); // FIXED: Count moves searched
+
+                int eval;
+
+                if (isFirstMove || isPVNode) {
+                    eval = searchWithQuiescence(copy, depth - 1, alpha, beta, false, isPVNode);
+                    isFirstMove = false;
+                } else {
+                    int nullWindow = isPVNode ? alpha + 10 : alpha + 1;
+                    eval = searchWithQuiescence(copy, depth - 1, alpha, nullWindow, false, false);
+
+                    if (eval > alpha && eval < beta) {
+                        // Re-search with full window
+                        eval = searchWithQuiescence(copy, depth - 1, eval, beta, false, true);
+                    }
+                }
+
+                if (eval > maxEval) {
+                    maxEval = eval;
+                    bestMove = move;
+                }
+
+                alpha = Math.max(alpha, eval);
+                if (beta <= alpha) {
+                    statistics.incrementAlphaBetaCutoffs(); // FIXED: Count cutoffs
+                    if (!Minimax.isCapture(move, state)) {
+                        moveOrdering.storeKillerMove(move, depth);
+                        moveOrdering.updateHistory(move, depth, depth * depth);
+                    }
+                    break;
+                }
+            }
+
+            storeTTEntry(hash, maxEval, depth, originalAlpha, beta, bestMove);
+            return maxEval;
+
+        } else {
+            // === MINIMIZING PLAYER ===
+            int minEval = Integer.MAX_VALUE;
+
+            for (int i = 0; i < moves.size(); i++) {
+                // PHASE 1 FIX: Periodic interruption checks
+                if (i % 3 == 0 && searchInterrupted) {
+                    break; // Exit gracefully
+                }
+
+                Move move = moves.get(i);
+                GameState copy = state.copy();
+                copy.applyMove(move);
+                statistics.addMovesSearched(1); // FIXED: Count moves searched
+
+                int eval;
+
+                if (isFirstMove || isPVNode) {
+                    eval = searchWithQuiescence(copy, depth - 1, alpha, beta, true, isPVNode);
+                    isFirstMove = false;
+                } else {
+                    int nullWindow = isPVNode ? beta - 10 : beta - 1;
+                    eval = searchWithQuiescence(copy, depth - 1, nullWindow, beta, true, false);
+
+                    if (eval < beta && eval > alpha) {
+                        eval = searchWithQuiescence(copy, depth - 1, alpha, eval, true, true);
+                    }
+                }
+
+                if (eval < minEval) {
+                    minEval = eval;
+                    bestMove = move;
+                }
+
+                beta = Math.min(beta, eval);
+                if (beta <= alpha) {
+                    statistics.incrementAlphaBetaCutoffs(); // FIXED: Count cutoffs
+                    if (!Minimax.isCapture(move, state)) {
+                        moveOrdering.storeKillerMove(move, depth);
+                        moveOrdering.updateHistory(move, depth, depth * depth);
+                    }
+                    break;
+                }
+            }
+
+            storeTTEntry(hash, minEval, depth, originalAlpha, beta, bestMove);
+            return minEval;
+        }
     }
 
     // === HELPER METHODS ===

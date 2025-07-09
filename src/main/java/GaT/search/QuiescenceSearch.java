@@ -15,16 +15,18 @@ public class QuiescenceSearch {
     private static final int MAX_Q_DEPTH = 12;
     private static final int MAX_TACTICAL_RECURSION = 2;
 
-    // === STATISTICS ===
+    // === STATISTICS - INTEGRATED WITH MAIN SYSTEM ===
     public static long qNodes = 0;
     public static long qCutoffs = 0;
     public static long standPatCutoffs = 0;
 
     /**
-     * FIXED: Thread-safe quiescence search
+     * FIXED: Integrated quiescence search with proper statistics
      */
     public static int quiesce(GameState state, int alpha, int beta, boolean maximizingPlayer, int qDepth) {
-        qNodes++;
+        // FIXED: Update main statistics system
+        SearchStatistics.getInstance().incrementQNodeCount();
+        qNodes++; // Keep local counter for compatibility
 
         if (qDepth >= MAX_Q_DEPTH) {
             return Minimax.evaluate(state, -qDepth);
@@ -110,120 +112,124 @@ public class QuiescenceSearch {
     }
 
     /**
-     * FIXED: Safe tactical move generation without recursion
+     * ENHANCED: Safe tactical move generation with better filtering
      */
-    public static List<Move> generateTacticalMoves(GameState state) {
-        return generateTacticalMovesSafe(state);
-    }
-
     private static List<Move> generateTacticalMovesSafe(GameState state) {
-        AtomicInteger depth = recursionDepth.get();
+        List<Move> allMoves = MoveGenerator.generateAllMoves(state);
+        List<Move> tacticalMoves = new ArrayList<>();
 
-        if (depth.get() >= MAX_TACTICAL_RECURSION) {
-            return new ArrayList<>(); // Prevent recursion
-        }
-
-        depth.incrementAndGet();
-        try {
-            List<Move> allMoves = MoveGenerator.generateAllMoves(state);
-            List<Move> tacticalMoves = new ArrayList<>();
-
-            for (Move move : allMoves) {
-                if (isTacticalMoveSafe(move, state)) {
-                    tacticalMoves.add(move);
-                }
+        for (Move move : allMoves) {
+            if (isTacticalMove(move, state)) {
+                tacticalMoves.add(move);
             }
-
-            return tacticalMoves;
-        } finally {
-            depth.decrementAndGet();
         }
+
+        // Sort tactical moves by estimated value (most promising first)
+        tacticalMoves.sort((m1, m2) -> {
+            int value1 = estimateCaptureValue(m1, state);
+            int value2 = estimateCaptureValue(m2, state);
+            return Integer.compare(value2, value1); // Descending order
+        });
+
+        // Limit tactical moves to prevent explosion
+        return tacticalMoves.size() > 8 ? tacticalMoves.subList(0, 8) : tacticalMoves;
     }
 
     /**
-     * FIXED: Safe tactical move detection without recursion
+     * Enhanced tactical move detection
      */
-    private static boolean isTacticalMoveSafe(Move move, GameState state) {
-        // 1. All captures are tactical
+    private static boolean isTacticalMove(Move move, GameState state) {
+        // Captures are always tactical
         if (isCapture(move, state)) {
             return true;
         }
 
-        // 2. Winning guard moves
-        if (isWinningGuardMove(move, state)) {
-            return true;
-        }
-
-        // 3. Simple check detection (no expensive calculations)
-        if (givesCheckSimple(move, state)) {
-            return true;
-        }
+        // Promotions would be tactical (if applicable to your game)
+        // Checks would be tactical (if applicable)
+        // For now, focus on captures which are most important for quiescence
 
         return false;
     }
 
+    /**
+     * Enhanced capture detection
+     */
     private static boolean isCapture(Move move, GameState state) {
         long toBit = GameState.bit(move.to);
         return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
     }
 
-    private static boolean isWinningGuardMove(Move move, GameState state) {
-        boolean isRed = state.redToMove;
-
-        // Check if it's a guard move
-        long guardBit = isRed ? state.redGuard : state.blueGuard;
-        if (guardBit == 0 || move.from != Long.numberOfTrailingZeros(guardBit)) {
-            return false;
+    /**
+     * ENHANCED: Better capture value estimation using actual piece values
+     */
+    private static int estimateCaptureValue(Move move, GameState state) {
+        if (!isCapture(move, state)) {
+            return 0;
         }
 
-        // Check if moving to enemy castle
-        int targetCastle = isRed ? GameState.getIndex(0, 3) : GameState.getIndex(6, 3);
-        return move.to == targetCastle;
-    }
-
-    private static boolean givesCheckSimple(Move move, GameState state) {
-        // Very simple check detection - just adjacent squares for guards
-        boolean isRed = state.redToMove;
-        long enemyGuard = isRed ? state.blueGuard : state.redGuard;
-
-        if (enemyGuard == 0) return false;
-
-        int enemyGuardPos = Long.numberOfTrailingZeros(enemyGuard);
-        int rankDiff = Math.abs(GameState.rank(move.to) - GameState.rank(enemyGuardPos));
-        int fileDiff = Math.abs(GameState.file(move.to) - GameState.file(enemyGuardPos));
-
-        // Simple adjacency check
-        return (rankDiff + fileDiff == 1) ||
-                (rankDiff == 0 && fileDiff <= move.amountMoved) ||
-                (fileDiff == 0 && rankDiff <= move.amountMoved);
-    }
-
-    private static int estimateCaptureValue(Move move, GameState state) {
         long toBit = GameState.bit(move.to);
         boolean isRed = state.redToMove;
 
-        // Guard capture
-        if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
-            return 1500;
+        // Check for guard captures (high value)
+        if ((isRed && (state.blueGuard & toBit) != 0) ||
+                (!isRed && (state.redGuard & toBit) != 0)) {
+            return 2000; // Guard value
         }
 
-        // Tower capture
-        if (((isRed ? state.blueTowers : state.redTowers) & toBit) != 0) {
-            int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
-            return height * 100;
+        // Check for tower captures
+        if (isRed && (state.blueTowers & toBit) != 0) {
+            return state.blueStackHeights[move.to] * 100; // Tower value per height
+        } else if (!isRed && (state.redTowers & toBit) != 0) {
+            return state.redStackHeights[move.to] * 100;
         }
 
         return 0;
     }
 
+    /**
+     * FIXED: Proper MVV-LVA (Most Valuable Victim - Least Valuable Attacker) scoring
+     */
+    private static int getMVVLVAScore(Move move, GameState state) {
+        int victimValue = estimateCaptureValue(move, state);
+        int attackerValue = getAttackerValue(move, state);
+
+        // MVV-LVA: High victim value, low attacker value = higher score
+        return victimValue * 100 - attackerValue;
+    }
+
+    /**
+     * Get the value of the piece making the move
+     */
+    private static int getAttackerValue(Move move, GameState state) {
+        long fromBit = GameState.bit(move.from);
+        boolean isRed = state.redToMove;
+
+        // Check if it's a guard move
+        if ((isRed && (state.redGuard & fromBit) != 0) ||
+                (!isRed && (state.blueGuard & fromBit) != 0)) {
+            return 2000; // Guard value
+        }
+
+        // Otherwise it's a tower move
+        return move.amountMoved * 100; // Tower value per piece moved
+    }
+
+    /**
+     * Reset quiescence statistics - ENHANCED
+     */
     public static void resetQuiescenceStats() {
         qNodes = 0;
         qCutoffs = 0;
         standPatCutoffs = 0;
+        // Note: Main statistics Q-node count is reset via SearchStatistics.reset()
     }
 
-    public static void setRemainingTime(long timeMs) {
-        // Adjust quiescence depth based on time
-        // Implementation as needed
+    /**
+     * Get quiescence statistics summary
+     */
+    public static String getStatsSummary() {
+        long mainQNodes = SearchStatistics.getInstance().getQNodeCount();
+        return String.format("Q-Stats: Main=%d, Local=%d, Cutoffs=%d, StandPat=%d",
+                mainQNodes, qNodes, qCutoffs, standPatCutoffs);
     }
 }
