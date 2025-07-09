@@ -21,7 +21,6 @@ import java.util.function.BooleanSupplier;
  * ✅ 4. Enhanced threat detection
  */
 public class SearchEngine {
-
     // === DEPENDENCIES ===
     private final Evaluator evaluator;
     private final MoveOrdering moveOrdering;
