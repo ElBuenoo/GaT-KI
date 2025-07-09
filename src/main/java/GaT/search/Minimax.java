@@ -596,4 +596,25 @@ public class Minimax {
             return SearchConfig.SearchStrategy.ALPHA_BETA;
         }
     }
+
+    /**
+     * Legacy findBestMoveWithQuiescence method - REQUIRED BY MAIN.JAVA
+     */
+    public static Move findBestMoveWithQuiescence(GameState state, int depth) {
+        return findBestMoveWithStrategy(state, depth, SearchConfig.SearchStrategy.ALPHA_BETA_Q);
+    }
+
+    /**
+     * Legacy findBestMoveWithPVS method
+     */
+    public static Move findBestMoveWithPVS(GameState state, int depth) {
+        return findBestMoveWithStrategy(state, depth, SearchConfig.SearchStrategy.PVS);
+    }
+
+    /**
+     * Ultimate AI method - PVS + Quiescence
+     */
+    public static Move findBestMoveUltimate(GameState state, int depth) {
+        return findBestMoveWithStrategy(state, depth, SearchConfig.SearchStrategy.PVS_Q);
+    }
 }

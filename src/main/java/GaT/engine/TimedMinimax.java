@@ -288,8 +288,8 @@ public class TimedMinimax {
 
         // Reset components
         statistics.reset();
-        transpositionTable.incrementAge();
-        moveOrdering.ageHistory();
+        // transpositionTable.incrementAge(); // ❌ REMOVED - not needed with LRU implementation
+        moveOrdering.ageHistory(); // ✅ This method exists and is correct
     }
 
     /**
@@ -467,4 +467,69 @@ public class TimedMinimax {
         System.out.println(getPerformanceReport());
         System.out.println(statistics.getSummary());
     }
+
+
+    public static Move findBestMoveSafe(GameState state, int maxDepth, long timeMillis) {
+        if (state == null) {
+            System.err.println("❌ Null state provided to safe search");
+            return null;
+        }
+
+        // Generate and verify legal moves first
+        List<Move> legalMoves;
+        try {
+            legalMoves = MoveGenerator.generateAllMoves(state);
+            if (legalMoves.isEmpty()) {
+                System.out.println("⚠️ No legal moves available");
+                return null;
+            }
+            System.out.println("✅ Safe search: " + legalMoves.size() + " legal moves found");
+        } catch (Exception e) {
+            System.err.println("❌ Move generation failed in safe search: " + e.getMessage());
+            return null;
+        }
+
+        // Single move case
+        if (legalMoves.size() == 1) {
+            System.out.println("✅ Only one legal move, returning immediately: " + legalMoves.get(0));
+            return legalMoves.get(0);
+        }
+
+        // Try different strategies in order of safety
+        SearchConfig.SearchStrategy[] strategies = {
+                SearchConfig.SearchStrategy.ALPHA_BETA,     // Safest - try first
+                SearchConfig.SearchStrategy.ALPHA_BETA_Q,   // Safe with quiescence
+                // Skip PVS strategies for now until we fix them
+        };
+
+        for (SearchConfig.SearchStrategy strategy : strategies) {
+            try {
+                System.out.println("🔍 Safe search trying strategy: " + strategy);
+
+                // Use shorter time limit and depth for safety
+                long safeTimeLimit = Math.min(timeMillis, 3000); // Max 3 seconds
+                int safeDepth = Math.min(maxDepth, 6); // Max depth 6
+
+                Move result = findBestMoveWithStrategy(state, safeDepth, safeTimeLimit, strategy);
+
+                if (result != null && legalMoves.contains(result)) {
+                    System.out.println("✅ Safe search succeeded with " + strategy + ": " + result);
+                    return result;
+                } else if (result != null) {
+                    System.err.println("⚠️ Strategy " + strategy + " returned illegal move: " + result);
+                } else {
+                    System.err.println("⚠️ Strategy " + strategy + " returned null");
+                }
+
+            } catch (Exception e) {
+                System.err.println("⚠️ Safe search strategy " + strategy + " failed: " + e.getMessage());
+                // Continue to next strategy
+            }
+        }
+
+        // Ultimate fallback: return first legal move
+        System.out.println("⚠️ All safe search strategies failed, returning first legal move: " + legalMoves.get(0));
+        return legalMoves.get(0);
+    }
+
 }

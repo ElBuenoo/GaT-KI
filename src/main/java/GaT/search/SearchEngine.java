@@ -227,10 +227,10 @@ public class SearchEngine {
 
         // Store in transposition table
         if (bestMove != null) {
-            TTEntry entry = new TTEntry(bestScore, depth, bestMove,
+            TTEntry entry = new TTEntry(bestScore, depth,
                     bestScore <= alpha ? TTEntry.UPPER_BOUND :
-                            bestScore >= beta ? TTEntry.LOWER_BOUND : TTEntry.EXACT);
-            transpositionTable.put(state.hash(), entry);
+                            bestScore >= beta ? TTEntry.LOWER_BOUND : TTEntry.EXACT,
+                    bestMove);
         }
 
         return bestScore;
