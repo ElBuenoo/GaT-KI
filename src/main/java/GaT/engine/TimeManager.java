@@ -235,6 +235,56 @@ public class TimeManager {
         }
     }
 
+    /**
+     * Allocate time for a move based on remaining time and game state
+     */
+    public long allocateTime(long totalTimeRemaining, int moveNumber, boolean isCritical) {
+        if (totalTimeRemaining <= 0) {
+            return 100; // Emergency minimum time
+        }
+
+        // Basic time allocation strategy
+        long baseTime;
+
+        if (moveNumber <= 10) {
+            // Opening: use less time
+            baseTime = totalTimeRemaining / 40;
+        } else if (moveNumber <= 30) {
+            // Middlegame: use more time
+            baseTime = totalTimeRemaining / 25;
+        } else {
+            // Endgame: use moderate time
+            baseTime = totalTimeRemaining / 30;
+        }
+
+        // Adjust for critical positions
+        if (isCritical) {
+            baseTime = Math.min((long)(baseTime * 1.5), totalTimeRemaining / 3);
+        }
+
+        // Emergency time management
+        if (totalTimeRemaining < 10000) { // Less than 10 seconds
+            baseTime = Math.min(baseTime, totalTimeRemaining / 5);
+        }
+
+        if (totalTimeRemaining < 3000) { // Less than 3 seconds
+            baseTime = Math.min(baseTime, totalTimeRemaining / 3);
+        }
+
+        // Ensure minimum and maximum bounds
+        baseTime = Math.max(50, baseTime); // At least 50ms
+        baseTime = Math.min(baseTime, totalTimeRemaining - 100); // Leave 100ms buffer
+
+        return baseTime;
+    }
+
+    /**
+     * Simple time allocation method
+     */
+    public long allocateTime(long totalTimeRemaining, int moveNumber) {
+        return allocateTime(totalTimeRemaining, moveNumber, false);
+    }
+
     private boolean areGuardsAdvanced(GameState state) {
         int redGuardRow = -1, blueGuardRow = -1;
 
@@ -312,6 +362,39 @@ public class TimeManager {
         if (estimatedMovesLeft > 5) { // Keep minimum of 5
             this.estimatedMovesLeft--;
         }
+    }
+
+    public long getEmergencyTime(long totalTimeRemaining) {
+        if (totalTimeRemaining < 1000) {
+            return Math.max(50, totalTimeRemaining / 2);
+        }
+        return Math.max(100, totalTimeRemaining / 10);
+    }
+
+    /**
+     * Check if we're in time pressure
+     */
+    public boolean isTimePressure(long totalTimeRemaining, int moveNumber) {
+        if (totalTimeRemaining < 5000) return true; // Less than 5 seconds
+        if (totalTimeRemaining < 30000 && moveNumber > 40) return true; // Less than 30s in endgame
+        return false;
+    }
+
+    /**
+     * Get recommended search depth based on time
+     */
+    public int getRecommendedDepth(long allocatedTime, boolean isCritical) {
+        if (allocatedTime < 100) return 2;
+        if (allocatedTime < 500) return 3;
+        if (allocatedTime < 1000) return 4;
+        if (allocatedTime < 2000) return 5;
+        if (allocatedTime < 5000) return 6;
+
+        int baseDepth = 7;
+        if (isCritical) baseDepth += 1;
+        if (allocatedTime > 10000) baseDepth += 1;
+
+        return Math.min(baseDepth, 10); // Cap at depth 10
     }
 
     public Phase getCurrentPhase() {

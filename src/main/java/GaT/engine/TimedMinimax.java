@@ -8,16 +8,18 @@ import GaT.search.*;
 import GaT.evaluation.Evaluator;
 
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 /**
- * PHASE 2 FIXED: TimedMinimax - Conservative Time Prediction
+ * COMPLETE FIXED TimedMinimax - All Methods Including Legacy Compatibility
  *
- * PHASE 2 FIXES:
- * ✅ 1. Much more conservative time prediction (70% statt 85%)
- * ✅ 2. Higher growth factors for safer depth estimation
- * ✅ 3. Earlier timeout checks (90% statt 95%)
- * ✅ 4. Better abort logic (95% statt 98%)
- * ✅ 5. Enhanced emergency fallback
+ * FIXES:
+ * ✅ All missing methods implemented
+ * ✅ Legacy compatibility methods added
+ * ✅ Complete error handling
+ * ✅ Proper timeout management
+ * ✅ Conservative time allocation
+ * ✅ Emergency fallbacks
  */
 public class TimedMinimax {
 
@@ -34,28 +36,61 @@ public class TimedMinimax {
     private static volatile boolean searchAborted = false;
     private static SearchConfig.SearchStrategy currentStrategy = SearchConfig.SearchStrategy.PVS_Q;
 
-    // === CHECKMATE THRESHOLD - Only terminate for actual wins ===
+    // === CONSTANTS ===
     private static final int CHECKMATE_THRESHOLD = 10000;
-    private static final int MIN_SEARCH_DEPTH = 5; // Always search at least this deep
+    private static final int MIN_SEARCH_DEPTH = 3;
+    private static final double TIME_SAFETY_FACTOR = 0.85; // Use only 85% of available time
 
     // === MAIN INTERFACES ===
 
+    /**
+     * Ultimate search method - uses best available strategy
+     */
     public static Move findBestMoveUltimate(GameState state, int maxDepth, long timeMillis) {
-        return findBestMoveFixed(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
+        return findBestMoveWithStrategy(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
     }
 
+    /**
+     * Search with specific strategy
+     */
     public static Move findBestMoveWithStrategy(GameState state, int maxDepth, long timeMillis,
                                                 SearchConfig.SearchStrategy strategy) {
         return findBestMoveFixed(state, maxDepth, timeMillis, strategy);
     }
 
-    // === CORE FIXED SEARCH ===
+    /**
+     * LEGACY COMPATIBILITY - findBestMoveWithTime method
+     * Used by MinimaxUnitTests.java and other legacy code
+     */
+    public static Move findBestMoveWithTime(GameState state, int maxDepth, long timeMillis) {
+        return findBestMoveFixed(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
+    }
 
+    /**
+     * Legacy compatibility method
+     */
+    public static Move findBestMove(GameState state, int maxDepth, long timeMillis) {
+        return findBestMoveUltimate(state, maxDepth, timeMillis);
+    }
+
+    /**
+     * Quick search for time pressure
+     */
+    public static Move findBestMoveQuick(GameState state, int maxDepth, long timeMillis) {
+        return findBestMoveWithStrategy(state, Math.min(maxDepth, 4), timeMillis,
+                SearchConfig.SearchStrategy.ALPHA_BETA);
+    }
+
+    // === CORE SEARCH IMPLEMENTATION ===
+
+    /**
+     * Main search implementation with complete error handling
+     */
     private static Move findBestMoveFixed(GameState state, int maxDepth, long timeMillis,
                                           SearchConfig.SearchStrategy strategy) {
         if (state == null) {
             System.err.println("❌ CRITICAL: Null game state!");
-            return null;
+            return getEmergencyMove(state);
         }
 
         if (strategy == null) {
@@ -73,265 +108,363 @@ public class TimedMinimax {
             return null;
         }
 
-        Move bestMove = legalMoves.get(0); // Emergency fallback
-        Move lastCompletedMove = bestMove;
-        int bestScore = Integer.MIN_VALUE;
-        int bestDepth = 0;
-        long totalNodes = 0;
+        // Quick move for single legal move
+        if (legalMoves.size() == 1) {
+            System.out.println("✅ Only one legal move available");
+            return legalMoves.get(0);
+        }
 
-        System.out.println("=== ULTRA-AGGRESSIVE SEARCH WITH " + strategy + " ===");
-        System.out.printf("Time: %dms | Legal moves: %d%n", timeMillis, legalMoves.size());
+        // Emergency quick evaluation for very short time
+        if (timeMillis < 100) {
+            System.out.println("⚡ Emergency quick move selection");
+            return selectQuickMove(state, legalMoves);
+        }
 
-        // === ITERATIVE DEEPENING ===
-        for (int depth = 1; depth <= maxDepth && !searchAborted; depth++) {
-            long depthStartTime = System.currentTimeMillis();
-            long nodesBefore = statistics.getNodeCount();
-            long qNodesBefore = statistics.getQNodeCount();
+        Move bestMove = null;
+        int bestScore = state.redToMove ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        int completedDepth = 0;
 
-            try {
-                SearchResult result = performRealSearch(state, depth, legalMoves);
-
-                if (result != null && result.move != null) {
-                    lastCompletedMove = result.move;
-                    bestMove = result.move;
-                    bestScore = result.score;
-                    bestDepth = depth;
-
-                    long depthNodes = statistics.getNodeCount() - nodesBefore;
-                    long depthQNodes = statistics.getQNodeCount() - qNodesBefore;
-                    totalNodes = statistics.getTotalNodes();
-
-                    long depthTime = System.currentTimeMillis() - depthStartTime;
-                    double nps = depthTime > 0 ? (double)(depthNodes + depthQNodes) * 1000 / depthTime : 0;
-
-                    System.out.printf("✅ Depth %d: %s (score: %+d, time: %dms, nodes: %,d, q-nodes: %,d, nps: %.0f)%n",
-                            depth, bestMove, result.score, depthTime, depthNodes, depthQNodes, nps);
-
-                    // FIXED: Only terminate for TRUE checkmate, not just "good" positions
-                    if (Math.abs(result.score) >= CHECKMATE_THRESHOLD && depth >= MIN_SEARCH_DEPTH) {
-                        System.out.println("♔ Checkmate found after depth " + depth + ", terminating");
-                        break;
-                    }
-
-                    // PHASE 2 FIX: More conservative time management
-                    if (!shouldContinueSearchConservative(depthTime, timeMillis, depth, totalNodes)) {
-                        System.out.println("⏱ Time management: Stopping search (conservative prediction)");
-                        break;
-                    }
-                } else {
-                    System.out.printf("⚠️ Depth %d failed, using last good move%n", depth);
-                    bestMove = lastCompletedMove; // Use last successful search
+        try {
+            // Iterative deepening
+            for (int depth = 1; depth <= maxDepth; depth++) {
+                if (searchAborted || shouldAbortSearch()) {
                     break;
                 }
 
-            } catch (Exception e) {
-                System.err.printf("❌ Error at depth %d: %s, using last good move%n", depth, e.getMessage());
-                bestMove = lastCompletedMove; // Use last successful search
-                break;
+                System.out.printf("🔍 Searching depth %d with %s...%n", depth, strategy);
+
+                Move currentBestMove = searchAtDepth(state, depth, strategy);
+
+                if (currentBestMove != null) {
+                    bestMove = currentBestMove;
+                    completedDepth = depth;
+
+                    // Get score for logging
+                    int currentScore = evaluateMove(state, currentBestMove, depth);
+
+                    System.out.printf("✅ Depth %d: %s (score: %+d)%n",
+                            depth, bestMove, currentScore);
+
+                    // Early termination for mate
+                    if (Math.abs(currentScore) >= CHECKMATE_THRESHOLD) {
+                        System.out.println("🎯 Checkmate found - terminating search early");
+                        break;
+                    }
+
+                    bestScore = currentScore;
+                } else {
+                    System.out.printf("⚠️ Depth %d search failed%n", depth);
+                    break;
+                }
+
+                // Time check after each depth
+                if (getElapsedTime() > timeLimitMillis * TIME_SAFETY_FACTOR) {
+                    System.out.printf("⏱️ Time limit reached after depth %d%n", depth);
+                    break;
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.printf("❌ Search error: %s%n", e.getMessage());
+            if (bestMove == null) {
+                bestMove = getEmergencyMove(state);
             }
         }
 
-        // === FINAL STATISTICS ===
-        long totalTime = System.currentTimeMillis() - startTime;
-        double timeUsagePercent = (double)totalTime / timeMillis * 100;
+        // Final validation
+        if (bestMove == null) {
+            System.err.println("❌ No move found - using emergency fallback");
+            bestMove = getEmergencyMove(state);
+        }
 
-        System.out.println("=== SEARCH COMPLETE ===");
-        System.out.printf("Best move: %s | Score: %+d | Depth: %d | Time: %dms (%.1f%% of allocated)%n",
-                bestMove, bestScore, bestDepth, totalTime, timeUsagePercent);
-        System.out.printf("Total nodes: %,d (regular: %,d, quiescence: %,d) | NPS: %,.0f%n",
-                totalNodes, statistics.getNodeCount(), statistics.getQNodeCount(),
-                totalTime > 0 ? (double)totalNodes * 1000 / totalTime : 0);
+        long totalTime = getElapsedTime();
+        System.out.printf("🏁 Search complete: %s (depth %d, %dms, %,d nodes)%n",
+                bestMove, completedDepth, totalTime, statistics.getNodeCount());
 
         return bestMove;
     }
 
-    // === PHASE 2 FIX: CONSERVATIVE TIME MANAGEMENT ===
-
-    private static boolean shouldContinueSearchConservative(long lastDepthTime, long totalTimeLimit,
-                                                            int currentDepth, long totalNodes) {
-        long elapsed = System.currentTimeMillis() - startTime;
-        long remaining = totalTimeLimit - elapsed;
-
-        // FIXED: Always search to minimum depth regardless of time
-        if (currentDepth < MIN_SEARCH_DEPTH && remaining > 100) {
-            return true;
-        }
-
-        // PHASE 2 FIX: More conservative - only continue if we have lots of time
-        if (remaining > totalTimeLimit * 0.5) { // More than 50% time remaining
-            System.out.printf("  ⚡ Plenty of time left (%.1f%%), continuing to depth %d%n",
-                    (double)remaining/totalTimeLimit*100, currentDepth + 1);
-            return true;
-        }
-
-        // PHASE 2 FIX: Conservative growth prediction
-        double growthFactor;
-        if (currentDepth <= 4) {
-            growthFactor = 3.0;  // Conservative for early depths (was 2.0)
-        } else if (currentDepth <= 6) {
-            growthFactor = 3.5;  // More conservative for mid depths (was 2.5)
-        } else if (currentDepth <= 8) {
-            growthFactor = 4.0;  // Very conservative for deep searches (was 3.0)
-        } else {
-            growthFactor = 5.0;  // Extremely conservative for very deep (was 4.0)
-        }
-
-        // Adjust based on complexity
-        if (totalNodes > 1000000) {
-            growthFactor *= 1.3; // Even more conservative for complex positions
-        }
-
-        long estimatedNextTime = (long)(lastDepthTime * growthFactor);
-
-        // PHASE 2 FIX: Use only 70% of remaining time (much more conservative than 85%)
-        boolean canComplete = estimatedNextTime < remaining * 0.70;
-
-        if (!canComplete) {
-            System.out.printf("  ⏱ Next depth %d estimated %dms > 70%% of remaining %dms%n",
-                    currentDepth + 1, estimatedNextTime, remaining);
-        }
-
-        return canComplete;
-    }
-
-    // === SEARCH IMPLEMENTATION ===
-
-    private static SearchResult performRealSearch(GameState state, int depth, List<Move> legalMoves) {
-        // Order moves
-        orderMoves(legalMoves, state, depth);
-
-        Move bestMove = null;
-        boolean isRed = state.redToMove;
-        int bestScore = isRed ? Integer.MIN_VALUE : Integer.MAX_VALUE;
-
-        int alpha = Integer.MIN_VALUE;
-        int beta = Integer.MAX_VALUE;
-
-        // PHASE 2 FIX: Set timeout checker for SearchEngine - more conservative
-        searchEngine.setTimeoutChecker(() -> searchAborted ||
-                System.currentTimeMillis() - startTime >= timeLimitMillis * 90 / 100); // 90% statt 95%
-
-        try {
-            int moveCount = 0;
-            for (Move move : legalMoves) {
-                if (searchAborted) break;
-
-                moveCount++;
-                GameState copy = state.copy();
-                copy.applyMove(move);
-
-                // Use SearchEngine with proper strategy
-                int score = searchEngine.search(copy, depth - 1, alpha, beta, !isRed, currentStrategy);
-
-                if ((isRed && score > bestScore) || (!isRed && score < bestScore) || bestMove == null) {
-                    bestScore = score;
-                    bestMove = move;
-
-                    // Update alpha-beta
-                    if (isRed) {
-                        alpha = Math.max(alpha, score);
-                    } else {
-                        beta = Math.min(beta, score);
-                    }
-                }
-
-                // FIXED: Only log truly exceptional moves
-                if (Math.abs(score) >= CHECKMATE_THRESHOLD) {
-                    System.out.printf("  ♔ Checkmate move found: %s (score: %+d)%n", move, score);
-                }
-
-                // Time check every few moves
-                if (moveCount % 5 == 0 && shouldAbortSearch()) {
-                    System.out.println("  ⏱ Time limit approaching, completing current depth");
-                    break;
-                }
-            }
-        } finally {
-            searchEngine.clearTimeoutChecker();
-        }
-
-        return bestMove != null ? new SearchResult(bestMove, bestScore) : null;
-    }
-
-    // === HELPER METHODS ===
-
-    private static void initializeSearchFixed(long timeMillis) {
-        startTime = System.currentTimeMillis();
-        timeLimitMillis = timeMillis;
-        searchAborted = false;
-
-        // Reset statistics
+    /**
+     * Search at specific depth
+     */
+    private static Move searchAtDepth(GameState state, int depth, SearchConfig.SearchStrategy strategy) {
         statistics.reset();
-        statistics.startSearch();
-        QuiescenceSearch.resetQuiescenceStats();
-
-        // Clear TT if too full
-        if (transpositionTable.size() > SearchConfig.TT_EVICTION_THRESHOLD) {
-            transpositionTable.clear();
-            System.out.println("🔧 Cleared transposition table");
-        }
-
-        // Reset move ordering
-        moveOrdering.resetKillerMoves();
-
-        // Set evaluation time
-        Evaluator.setRemainingTime(timeMillis);
-        QuiescenceSearch.setRemainingTime(timeMillis);
-
-        System.out.println("🔧 Search initialized with " + currentStrategy + " - ULTRA-AGGRESSIVE MODE");
-    }
-
-    private static void orderMoves(List<Move> moves, GameState state, int depth) {
-        if (moves.size() <= 1) return;
+        setupTimeoutChecker();
 
         try {
-            TTEntry entry = transpositionTable.get(state.hash());
-            moveOrdering.orderMoves(moves, state, depth, entry);
+            return Minimax.findBestMoveWithStrategy(state, depth, strategy);
         } catch (Exception e) {
-            // Simple fallback ordering
-            moves.sort((a, b) -> {
-                boolean aCap = isCapture(a, state);
-                boolean bCap = isCapture(b, state);
-                if (aCap && !bCap) return -1;
-                if (!aCap && bCap) return 1;
-                return Integer.compare(b.amountMoved, a.amountMoved);
-            });
+            System.err.printf("❌ Depth %d search failed: %s%n", depth, e.getMessage());
+            return null;
+        } finally {
+            clearTimeoutChecker();
         }
     }
 
-    // PHASE 2 FIX: More conservative abort check
+    /**
+     * Evaluate a move's quality
+     */
+    private static int evaluateMove(GameState state, Move move, int depth) {
+        try {
+            GameState copy = state.copy();
+            copy.applyMove(move);
+            return evaluator.evaluate(copy, depth);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Emergency move selection for critical situations
+     */
+    private static Move getEmergencyMove(GameState state) {
+        if (state == null) return null;
+
+        List<Move> moves = MoveGenerator.generateAllMoves(state);
+        if (moves.isEmpty()) return null;
+
+        return selectQuickMove(state, moves);
+    }
+
+    /**
+     * Quick move selection using simple heuristics
+     */
+    private static Move selectQuickMove(GameState state, List<Move> moves) {
+        Move bestMove = moves.get(0);
+        int bestScore = Integer.MIN_VALUE;
+
+        for (Move move : moves) {
+            int score = scoreMoveFast(state, move);
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = move;
+            }
+        }
+
+        return bestMove;
+    }
+
+    /**
+     * Fast move scoring for emergency situations
+     */
+    private static int scoreMoveFast(GameState state, Move move) {
+        int score = 0;
+
+        // Captures are good
+        if (Minimax.isCapture(move, state)) {
+            score += 1000;
+            if (Minimax.capturesGuard(move, state)) {
+                score += 5000;
+            }
+        }
+
+        // Moving toward enemy castle
+        boolean isRed = state.redToMove;
+        int enemyCastle = isRed ? Minimax.BLUE_CASTLE_INDEX : Minimax.RED_CASTLE_INDEX;
+        int currentDist = Math.abs(GameState.rank(move.from) - GameState.rank(enemyCastle)) +
+                Math.abs(GameState.file(move.from) - GameState.file(enemyCastle));
+        int newDist = Math.abs(GameState.rank(move.to) - GameState.rank(enemyCastle)) +
+                Math.abs(GameState.file(move.to) - GameState.file(enemyCastle));
+
+        if (newDist < currentDist) {
+            score += 100;
+        }
+
+        return score;
+    }
+
+    // === SEARCH MANAGEMENT ===
+
+    /**
+     * Initialize search with proper time management
+     */
+    private static void initializeSearchFixed(long timeMillis) {
+        timeLimitMillis = Math.max(50, (long)(timeMillis * TIME_SAFETY_FACTOR));
+        startTime = System.currentTimeMillis();
+        searchAborted = false;
+        currentStrategy = SearchConfig.SearchStrategy.PVS_Q;
+
+        System.out.printf("🚀 Starting search with %dms time limit%n", timeLimitMillis);
+
+        // Reset components
+        statistics.reset();
+        transpositionTable.incrementAge();
+        moveOrdering.ageHistory();
+    }
+
+    /**
+     * Setup timeout checker for search engines
+     */
+    private static void setupTimeoutChecker() {
+        BooleanSupplier timeoutChecker = () -> {
+            if (searchAborted) return true;
+            long elapsed = getElapsedTime();
+            return elapsed >= timeLimitMillis;
+        };
+
+        searchEngine.setTimeoutChecker(timeoutChecker);
+        Minimax.setTimeoutChecker(timeoutChecker);
+        PVSSearch.setTimeoutChecker(timeoutChecker);
+    }
+
+    /**
+     * Clear timeout checkers
+     */
+    private static void clearTimeoutChecker() {
+        searchEngine.clearTimeoutChecker();
+        Minimax.clearTimeoutChecker();
+        PVSSearch.clearTimeoutChecker();
+    }
+
+    /**
+     * Check if search should be aborted
+     */
     private static boolean shouldAbortSearch() {
-        if (!searchAborted && System.currentTimeMillis() - startTime >= timeLimitMillis * 95 / 100) { // 95% statt 98%
-            searchAborted = true;
-            return true;
-        }
-        return searchAborted;
+        return searchAborted || getElapsedTime() >= timeLimitMillis;
     }
 
-    private static boolean isCapture(Move move, GameState state) {
-        long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
+    /**
+     * Get elapsed search time
+     */
+    public static long getElapsedTime() {
+        return System.currentTimeMillis() - startTime;
     }
 
-    // === RESULT CLASS ===
-
-    private static class SearchResult {
-        final Move move;
-        final int score;
-
-        SearchResult(Move move, int score) {
-            this.move = move;
-            this.score = score;
-        }
+    /**
+     * Abort current search
+     */
+    public static void abortSearch() {
+        searchAborted = true;
+        System.out.println("⚠️ Search aborted by request");
     }
 
-    // === LEGACY COMPATIBILITY ===
+    // === UTILITY METHODS ===
 
-    public static Move findBestMoveWithTime(GameState state, int maxDepth, long timeMillis) {
-        return findBestMoveFixed(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
+    /**
+     * Get current search statistics
+     */
+    public static SearchStatistics getStatistics() {
+        return statistics;
     }
 
+    /**
+     * Get current search strategy
+     */
+    public static SearchConfig.SearchStrategy getCurrentStrategy() {
+        return currentStrategy;
+    }
+
+    /**
+     * Check if search is currently running
+     */
+    public static boolean isSearchRunning() {
+        return !searchAborted && getElapsedTime() < timeLimitMillis;
+    }
+
+    /**
+     * Get remaining search time
+     */
+    public static long getRemainingTime() {
+        return Math.max(0, timeLimitMillis - getElapsedTime());
+    }
+
+    /**
+     * Reset all search state
+     */
+    public static void resetSearch() {
+        searchAborted = false;
+        startTime = 0;
+        timeLimitMillis = 0;
+        statistics.reset();
+    }
+
+    // === LEGACY COMPATIBILITY METHODS ===
+
+    /**
+     * Get total nodes searched (legacy compatibility)
+     */
     public static long getTotalNodesSearched() {
         return statistics.getTotalNodes();
+    }
+
+    /**
+     * Get search time (legacy compatibility)
+     */
+    public static long getSearchTime() {
+        return getElapsedTime();
+    }
+
+    /**
+     * Get search depth completed (legacy compatibility)
+     */
+    public static int getSearchDepth() {
+        return statistics.getMaxDepthReached();
+    }
+
+    /**
+     * Simple search with default parameters (legacy compatibility)
+     */
+    public static Move search(GameState state, int depth, long timeMillis) {
+        return findBestMoveWithTime(state, depth, timeMillis);
+    }
+
+    // === STRATEGY TESTING METHODS ===
+
+    /**
+     * Test all strategies and return best result
+     */
+    public static Move findBestMoveMultiStrategy(GameState state, int depth, long timeMillis) {
+        SearchConfig.SearchStrategy[] strategies = {
+                SearchConfig.SearchStrategy.PVS_Q,
+                SearchConfig.SearchStrategy.PVS,
+                SearchConfig.SearchStrategy.ALPHA_BETA_Q
+        };
+
+        Move bestMove = null;
+        int bestScore = state.redToMove ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        long timePerStrategy = timeMillis / strategies.length;
+
+        for (SearchConfig.SearchStrategy strategy : strategies) {
+            try {
+                Move move = findBestMoveWithStrategy(state, depth, timePerStrategy, strategy);
+                if (move != null) {
+                    int score = evaluateMove(state, move, depth);
+                    if ((state.redToMove && score > bestScore) || (!state.redToMove && score < bestScore)) {
+                        bestScore = score;
+                        bestMove = move;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.printf("Strategy %s failed: %s%n", strategy, e.getMessage());
+            }
+        }
+
+        return bestMove != null ? bestMove : getEmergencyMove(state);
+    }
+
+    // === DEBUGGING AND ANALYSIS ===
+
+    /**
+     * Get search performance report
+     */
+    public static String getPerformanceReport() {
+        long nodes = statistics.getTotalNodes();
+        long time = getElapsedTime();
+        double nps = time > 0 ? nodes * 1000.0 / time : 0;
+
+        return String.format("Performance: %,d nodes in %dms (%.0f NPS)", nodes, time, nps);
+    }
+
+    /**
+     * Print detailed search statistics
+     */
+    public static void printSearchStatistics() {
+        System.out.println("\n=== TIMED SEARCH STATISTICS ===");
+        System.out.println("Strategy: " + currentStrategy);
+        System.out.println("Time allocated: " + timeLimitMillis + "ms");
+        System.out.println("Time used: " + getElapsedTime() + "ms");
+        System.out.println("Search aborted: " + searchAborted);
+        System.out.println(getPerformanceReport());
+        System.out.println(statistics.getSummary());
     }
 }

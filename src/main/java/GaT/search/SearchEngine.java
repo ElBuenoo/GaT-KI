@@ -170,7 +170,7 @@ public class SearchEngine {
             GameState copy = state.copy();
             copy.applyMove(move);
 
-            int score;
+            int score = 0;
             boolean needsFullSearch = true;
 
             // === LATE MOVE REDUCTIONS ===

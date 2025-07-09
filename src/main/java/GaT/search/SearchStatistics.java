@@ -3,6 +3,9 @@ package GaT.search;
 import java.util.HashMap;
 import java.util.Map;
 
+import static GaT.engine.TimedMinimax.getElapsedTime;
+
+
 /**
  * SEARCH STATISTICS - Centralized metrics tracking
  * Extracted from scattered counters in Minimax, QuiescenceSearch, etc.
@@ -15,6 +18,9 @@ public class SearchStatistics {
     private long leafNodeCount = 0;
     private long branchingFactor = 0;
     private int maxDepthReached = 0;
+    private long lmrReSearches = 0;
+
+    private long movesSearched = 0;
 
     // === TRANSPOSITION TABLE STATS ===
     private long ttHits = 0;
@@ -155,16 +161,13 @@ public class SearchStatistics {
 
     public void incrementTTHits() { ttHits++; }
     public void incrementTTMisses() { ttMisses++; }
-    public void incrementTTStores() { ttStores++; }
     public void incrementTTCollisions() { ttCollisions++; }
 
     // === PRUNING ===
 
     public void incrementAlphaBetaCutoffs() { alphaBetaCutoffs++; }
     public void incrementReverseFutilityCutoffs() { reverseFutilityCutoffs++; }
-    public void incrementNullMoveCutoffs() { nullMoveCutoffs++; }
-    public void incrementFutilityCutoffs() { futilityCutoffs++; }
-    public void incrementLMRReductions() { lmrReductions++; }
+
     public void incrementCheckExtensions() { checkExtensions++; }
 
     // === QUIESCENCE ===
@@ -176,8 +179,7 @@ public class SearchStatistics {
 
     // === MOVE ORDERING ===
 
-    public void incrementKillerMoveHits() { killerMoveHits++; }
-    public void incrementHistoryMoveHits() { historyMoveHits++; }
+
     public void incrementTTMoveHits() { ttMoveHits++; }
     public void incrementCaptureOrderingHits() { captureOrderingHits++; }
 
@@ -191,9 +193,6 @@ public class SearchStatistics {
         totalMovesGenerated += count;
     }
 
-    public void addMovesSearched(int count) {
-        totalMovesSearched += count;
-    }
 
     // === GETTERS ===
 
@@ -232,17 +231,7 @@ public class SearchStatistics {
 
     // === ANALYSIS METHODS ===
 
-    /**
-     * Get search efficiency score (0-100)
-     */
-    public double getSearchEfficiency() {
-        double ttEfficiency = getTTHitRate() * 20;           // 0-20 points
-        double cutoffEfficiency = getCutoffRate() * 30;      // 0-30 points
-        double branchingEfficiency = Math.max(0, 25 - getAverageBranchingFactor()); // 0-25 points
-        double speedEfficiency = Math.min(25, getNodesPerSecond() / 10000); // 0-25 points
 
-        return Math.min(100, ttEfficiency + cutoffEfficiency + branchingEfficiency + speedEfficiency);
-    }
 
     /**
      * Get most frequently searched moves
@@ -342,4 +331,318 @@ public class SearchStatistics {
     public static String getCSVHeader() {
         return "nodes,qnodes,depth,time_ms,tt_probes,tt_hit_rate,cutoff_rate,branching_factor,efficiency\n";
     }
+
+    // ADD THESE METHODS TO YOUR EXISTING SearchStatistics.java CLASS
+
+    /**
+     * Get Late Move Reductions count
+     */
+    public long getLMRReductions() {
+        return lmrReductions;
+    }
+
+    /**
+     * Increment Late Move Reductions
+     */
+    public void incrementLMRReductions() {
+        lmrReductions++;
+    }
+
+    /**
+     * Get LMR Re-searches count
+     */
+    public long getLMRReSearches() {
+        return lmrReSearches;
+    }
+
+    /**
+     * Increment LMR Re-searches
+     */
+    public void incrementLMRReSearches() {
+        lmrReSearches++;
+    }
+
+    /**
+     * Get Null Move cutoffs count
+     */
+    public long getNullMoveCutoffs() {
+        return nullMoveCutoffs;
+    }
+
+    /**
+     * Increment Null Move cutoffs
+     */
+    public void incrementNullMoveCutoffs() {
+        nullMoveCutoffs++;
+    }
+
+    /**
+     * Get Futility cutoffs count
+     */
+    public long getFutilityCutoffs() {
+        return futilityCutoffs;
+    }
+
+    /**
+     * Increment Futility cutoffs
+     */
+    public void incrementFutilityCutoffs() {
+        futilityCutoffs++;
+    }
+
+    /**
+     * Get TT stores count
+     */
+    public long getTTStores() {
+        return ttStores;
+    }
+
+    /**
+     * Increment TT stores
+     */
+    public void incrementTTStores() {
+        ttStores++;
+    }
+
+    /**
+     * Get Killer Move hits count
+     */
+    public long getKillerMoveHits() {
+        return killerMoveHits;
+    }
+
+    /**
+     * Increment Killer Move hits
+     */
+    public void incrementKillerMoveHits() {
+        killerMoveHits++;
+    }
+
+    /**
+     * Get History Move hits count
+     */
+    public long getHistoryMoveHits() {
+        return historyMoveHits;
+    }
+
+    /**
+     * Increment History Move hits
+     */
+    public void incrementHistoryMoveHits() {
+        historyMoveHits++;
+    }
+
+    /**
+     * Add to moves searched count
+     */
+    public void addMovesSearched(int count) {
+        movesSearched += count;
+    }
+
+    /**
+     * Get total moves searched
+     */
+    public long getMovesSearched() {
+        return movesSearched;
+    }
+
+    /**
+     * Get search efficiency (nodes per second)
+     */
+    public double getSearchEfficiency() {
+        long elapsed = getElapsedTime();
+        if (elapsed > 0) {
+            return (double) getTotalNodes() * 1000.0 / elapsed;
+        }
+        return 0.0;
+    }
+
+    /**
+     * Get move ordering efficiency
+     */
+    public double getMoveOrderingEfficiency() {
+        long totalOrderingAttempts = killerMoveHits + historyMoveHits + captureOrderingHits;
+        if (alphaBetaCutoffs > 0) {
+            return (double) totalOrderingAttempts / alphaBetaCutoffs;
+        }
+        return 0.0;
+    }
+
+    /**
+     * Get pruning effectiveness
+     */
+    public double getPruningEffectiveness() {
+        long totalPruning = nullMoveCutoffs + futilityCutoffs + reverseFutilityCutoffs + lmrReductions;
+        if (nodeCount > 0) {
+            return (double) totalPruning / nodeCount;
+        }
+        return 0.0;
+    }
+
+    /**
+     * Enhanced summary with all tactical features
+     */
+    public String getEnhancedSummary() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== ENHANCED SEARCH STATISTICS ===\n");
+
+        // Basic stats
+        sb.append(String.format("Nodes: %,d (Regular: %,d, Q: %,d)\n",
+                getTotalNodes(), nodeCount, qNodeCount));
+        sb.append(String.format("Time: %,dms (%.1f NPS)\n",
+                getElapsedTime(), getSearchEfficiency()));
+
+        // Search depth and iterations
+        sb.append(String.format("Max Depth: %d, Iterations: %d\n",
+                maxDepthReached, iterationsCompleted));
+
+        // Transposition Table
+        sb.append(String.format("TT: %.1f%% hit rate (%,d hits, %,d stores)\n",
+                getTTHitRate() * 100, ttHits, ttStores));
+
+        // Pruning statistics
+        sb.append(String.format("Pruning Effectiveness: %.1f%%\n", getPruningEffectiveness() * 100));
+        if (nullMoveCutoffs > 0) {
+            sb.append(String.format("  Null Move: %,d cutoffs\n", nullMoveCutoffs));
+        }
+        if (lmrReductions > 0) {
+            sb.append(String.format("  LMR: %,d reductions, %,d re-searches\n",
+                    lmrReductions, lmrReSearches));
+        }
+        if (futilityCutoffs > 0) {
+            sb.append(String.format("  Futility: %,d cutoffs\n", futilityCutoffs));
+        }
+        if (reverseFutilityCutoffs > 0) {
+            sb.append(String.format("  Reverse Futility: %,d cutoffs\n", reverseFutilityCutoffs));
+        }
+
+        // Move ordering
+        sb.append(String.format("Move Ordering Efficiency: %.1f%%\n", getMoveOrderingEfficiency() * 100));
+        if (killerMoveHits > 0) {
+            sb.append(String.format("  Killer Moves: %,d hits\n", killerMoveHits));
+        }
+        if (historyMoveHits > 0) {
+            sb.append(String.format("  History: %,d hits\n", historyMoveHits));
+        }
+        if (captureOrderingHits > 0) {
+            sb.append(String.format("  Capture Ordering: %,d hits\n", captureOrderingHits));
+        }
+
+        // Quiescence details
+        if (qNodeCount > 0) {
+            sb.append(String.format("Quiescence: %,d nodes\n", qNodeCount));
+            if (standPatCutoffs > 0) {
+                sb.append(String.format("  Stand Pat: %,d cutoffs\n", standPatCutoffs));
+            }
+            if (deltaPruningCutoffs > 0) {
+                sb.append(String.format("  Delta Pruning: %,d cutoffs\n", deltaPruningCutoffs));
+            }
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Performance analysis report
+     */
+    public String getPerformanceReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== PERFORMANCE ANALYSIS ===\n");
+
+        double nps = getSearchEfficiency();
+        sb.append(String.format("Search Speed: %.0f NPS\n", nps));
+
+        if (nps > 100000) {
+            sb.append("🚀 Excellent search speed!\n");
+        } else if (nps > 50000) {
+            sb.append("✅ Good search speed\n");
+        } else if (nps > 10000) {
+            sb.append("⚠️ Moderate search speed\n");
+        } else {
+            sb.append("🐌 Slow search speed - consider optimization\n");
+        }
+
+        double pruningEff = getPruningEffectiveness();
+        sb.append(String.format("Pruning: %.1f%% effectiveness\n", pruningEff * 100));
+
+        if (pruningEff > 0.3) {
+            sb.append("🔥 Excellent pruning!\n");
+        } else if (pruningEff > 0.2) {
+            sb.append("✅ Good pruning\n");
+        } else if (pruningEff > 0.1) {
+            sb.append("⚠️ Moderate pruning\n");
+        } else {
+            sb.append("🐌 Poor pruning - check algorithms\n");
+        }
+
+        double ttHitRate = getTTHitRate();
+        sb.append(String.format("TT Hit Rate: %.1f%%\n", ttHitRate * 100));
+
+        if (ttHitRate > 0.5) {
+            sb.append("🎯 Excellent TT utilization!\n");
+        } else if (ttHitRate > 0.3) {
+            sb.append("✅ Good TT utilization\n");
+        } else if (ttHitRate > 0.1) {
+            sb.append("⚠️ Moderate TT utilization\n");
+        } else {
+            sb.append("🔍 Poor TT utilization - check hash function\n");
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Tactical features usage report
+     */
+    public String getTacticalReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== TACTICAL FEATURES USAGE ===\n");
+
+        // Null Move Pruning
+        if (nullMoveCutoffs > 0) {
+            double nullMoveRate = (double) nullMoveCutoffs / nodeCount;
+            sb.append(String.format("Null Move Pruning: %,d cutoffs (%.1f%% of nodes)\n",
+                    nullMoveCutoffs, nullMoveRate * 100));
+            if (nullMoveRate > 0.1) {
+                sb.append("  🎯 Excellent null move usage!\n");
+            } else {
+                sb.append("  ⚠️ Consider tuning null move parameters\n");
+            }
+        } else {
+            sb.append("Null Move Pruning: Not used\n");
+        }
+
+        // Late Move Reductions
+        if (lmrReductions > 0) {
+            double lmrRate = (double) lmrReductions / movesSearched;
+            double reSearchRate = (double) lmrReSearches / lmrReductions;
+            sb.append(String.format("Late Move Reductions: %,d reductions (%.1f%% re-search rate)\n",
+                    lmrReductions, reSearchRate * 100));
+            if (reSearchRate < 0.3) {
+                sb.append("  🎯 Excellent LMR efficiency!\n");
+            } else if (reSearchRate < 0.5) {
+                sb.append("  ✅ Good LMR efficiency\n");
+            } else {
+                sb.append("  ⚠️ High re-search rate - consider tuning LMR\n");
+            }
+        } else {
+            sb.append("Late Move Reductions: Not used\n");
+        }
+
+        // Futility Pruning
+        if (futilityCutoffs > 0) {
+            double futilityRate = (double) futilityCutoffs / nodeCount;
+            sb.append(String.format("Futility Pruning: %,d cutoffs (%.1f%% of nodes)\n",
+                    futilityCutoffs, futilityRate * 100));
+        }
+
+        return sb.toString();
+    }
+
+
+
+
+
+
+
 }
