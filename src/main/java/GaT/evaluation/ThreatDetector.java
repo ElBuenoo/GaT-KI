@@ -3,592 +3,540 @@ package GaT.evaluation;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.search.MoveGenerator;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * THREAT DETECTION SYSTEM - Explicit Defensive Analysis
- *
- * Systematically detects and evaluates threats in the position.
- * Essential for defensive play and avoiding tactical oversights.
+ * COMPREHENSIVE THREAT DETECTION SYSTEM
+ * Analyzes tactical threats, defensive requirements, and forcing sequences
  */
 public class ThreatDetector {
 
-    // === THREAT SEVERITY LEVELS ===
-    public enum ThreatLevel {
-        NONE(0),
-        MINOR(50),
-        MODERATE(150),
-        SERIOUS(350),
-        CRITICAL(800),
-        FATAL(2000);
-
-        public final int value;
-        ThreatLevel(int value) { this.value = value; }
-    }
-
-    // === THREAT TYPES ===
-    public enum ThreatType {
-        GUARD_CAPTURE("Guard under attack"),
-        CASTLE_THREAT("Enemy guard near castle"),
-        MATERIAL_LOSS("Material under attack"),
-        POSITIONAL_THREAT("Positional pressure"),
-        TACTICAL_MOTIF("Tactical pattern"),
-        ZUGZWANG("Forced into bad move");
-
-        public final String description;
-        ThreatType(String description) { this.description = description; }
-    }
-
-    // === THREAT ANALYSIS RESULT ===
-    public static class ThreatAnalysis {
-        public final List<DetectedThreat> threats;
-        public final ThreatLevel maxThreatLevel;
-        public final int totalThreatScore;
-        public final List<Move> defensiveMoves;
-        public final boolean requiresImmediateAction;
-
-        public ThreatAnalysis(List<DetectedThreat> threats, List<Move> defensiveMoves) {
-            this.threats = threats;
-            this.defensiveMoves = defensiveMoves;
-            this.maxThreatLevel = threats.stream()
-                    .map(t -> t.level)
-                    .max(Comparator.comparingInt(l -> l.value))
-                    .orElse(ThreatLevel.NONE);
-            this.totalThreatScore = threats.stream()
-                    .mapToInt(t -> t.level.value)
-                    .sum();
-            this.requiresImmediateAction = maxThreatLevel.value >= ThreatLevel.SERIOUS.value;
-        }
-
-        public boolean hasCriticalThreats() {
-            return maxThreatLevel.value >= ThreatLevel.CRITICAL.value;
-        }
-
-        public boolean hasAnyThreats() {
-            return !threats.isEmpty();
-        }
-    }
-
-    // === INDIVIDUAL THREAT ===
-    public static class DetectedThreat {
-        public final ThreatType type;
-        public final ThreatLevel level;
-        public final int targetSquare;
-        public final int attackerSquare;
-        public final Move threatMove;
-        public final String description;
-        public final List<Move> defenses;
-
-        public DetectedThreat(ThreatType type, ThreatLevel level, int targetSquare,
-                              int attackerSquare, Move threatMove, String description,
-                              List<Move> defenses) {
-            this.type = type;
-            this.level = level;
-            this.targetSquare = targetSquare;
-            this.attackerSquare = attackerSquare;
-            this.threatMove = threatMove;
-            this.description = description;
-            this.defenses = defenses != null ? defenses : new ArrayList<>();
-        }
-    }
-
-    // === MAIN THREAT ANALYSIS INTERFACE ===
+    // Threat types
+    public static final int NO_THREAT = 0;
+    public static final int GUARD_THREAT = 1;
+    public static final int CASTLE_THREAT = 2;
+    public static final int MATERIAL_THREAT = 3;
+    public static final int FORK_THREAT = 4;
+    public static final int PIN_THREAT = 5;
+    public static final int DISCOVERED_THREAT = 6;
 
     /**
-     * COMPREHENSIVE THREAT ANALYSIS
+     * Main threat analysis result
+     */
+    public static class ThreatAnalysis {
+        public final List<Threat> immediateThreats;
+        public final List<Threat> potentialThreats;
+        public final List<Move> defensiveMoves;
+        public final int threatLevel; // 0-10 scale
+        public final boolean inCheck;
+        public final boolean mustDefend;
+
+        public ThreatAnalysis(List<Threat> immediate, List<Threat> potential,
+                              List<Move> defensive, int level, boolean check, boolean defend) {
+            this.immediateThreats = immediate;
+            this.potentialThreats = potential;
+            this.defensiveMoves = defensive;
+            this.threatLevel = level;
+            this.inCheck = check;
+            this.mustDefend = defend;
+        }
+    }
+
+    /**
+     * Individual threat representation
+     */
+    public static class Threat {
+        public final int type;
+        public final Move attackingMove;
+        public final int targetSquare;
+        public final int threatValue;
+        public final boolean isImmediate;
+
+        public Threat(int type, Move move, int target, int value, boolean immediate) {
+            this.type = type;
+            this.attackingMove = move;
+            this.targetSquare = target;
+            this.threatValue = value;
+            this.isImmediate = immediate;
+        }
+    }
+
+    /**
+     * Analyze all threats in the current position
      */
     public static ThreatAnalysis analyzeThreats(GameState state) {
-        List<DetectedThreat> allThreats = new ArrayList<>();
+        List<Threat> immediateThreats = new ArrayList<>();
+        List<Threat> potentialThreats = new ArrayList<>();
+        List<Move> defensiveMoves = new ArrayList<>();
 
-        // 1. Guard threats (highest priority)
-        allThreats.addAll(detectGuardThreats(state));
+        // Switch perspective to analyze opponent's threats
+        GameState opponentView = state.copy();
+        opponentView.redToMove = !opponentView.redToMove;
 
-        // 2. Castle threats
-        allThreats.addAll(detectCastleThreats(state));
+        // Generate opponent's moves
+        List<Move> opponentMoves = MoveGenerator.generateAllMoves(opponentView);
 
-        // 3. Material threats
-        allThreats.addAll(detectMaterialThreats(state));
+        // Analyze each opponent move for threats
+        boolean inCheck = false;
+        int maxThreatValue = 0;
 
-        // 4. Positional threats
-        allThreats.addAll(detectPositionalThreats(state));
+        for (Move move : opponentMoves) {
+            Threat threat = analyzeSingleMove(opponentView, move);
+            if (threat != null) {
+                if (threat.isImmediate) {
+                    immediateThreats.add(threat);
+                    maxThreatValue = Math.max(maxThreatValue, threat.threatValue);
 
-        // 5. Tactical motifs
-        allThreats.addAll(detectTacticalMotifs(state));
-
-        // Find defensive moves
-        List<Move> defensiveMoves = findDefensiveMoves(state, allThreats);
-
-        return new ThreatAnalysis(allThreats, defensiveMoves);
-    }
-
-    /**
-     * QUICK THREAT CHECK - For time-critical situations
-     */
-    public static ThreatAnalysis quickThreatCheck(GameState state) {
-        List<DetectedThreat> criticalThreats = new ArrayList<>();
-
-        // Only check the most critical threats
-        criticalThreats.addAll(detectGuardThreats(state));
-        criticalThreats.addAll(detectCastleThreats(state));
-
-        List<Move> defensiveMoves = findImmediateDefenses(state, criticalThreats);
-
-        return new ThreatAnalysis(criticalThreats, defensiveMoves);
-    }
-
-    // === SPECIFIC THREAT DETECTION METHODS ===
-
-    /**
-     * DETECT GUARD THREATS - Highest priority
-     */
-    private static List<DetectedThreat> detectGuardThreats(GameState state) {
-        List<DetectedThreat> threats = new ArrayList<>();
-        boolean isRed = state.redToMove;
-
-        // Check our guard
-        long ourGuard = isRed ? state.redGuard : state.blueGuard;
-        if (ourGuard != 0) {
-            int guardPos = Long.numberOfTrailingZeros(ourGuard);
-            List<Move> attackingMoves = findAttacksOnSquare(guardPos, state, !isRed);
-
-            for (Move attack : attackingMoves) {
-                ThreatLevel level = ThreatLevel.FATAL;
-                String desc = String.format("Guard on %s under attack by %s",
-                        squareName(guardPos), squareName(attack.from));
-
-                List<Move> defenses = findGuardDefenses(state, guardPos, attack);
-
-                threats.add(new DetectedThreat(ThreatType.GUARD_CAPTURE, level,
-                        guardPos, attack.from, attack, desc, defenses));
+                    if (threat.type == GUARD_THREAT) {
+                        inCheck = true;
+                    }
+                } else {
+                    potentialThreats.add(threat);
+                }
             }
         }
 
-        return threats;
+        // Find defensive moves if there are threats
+        if (!immediateThreats.isEmpty()) {
+            defensiveMoves = findDefensiveMoves(state, immediateThreats);
+        }
+
+        // Calculate overall threat level (0-10)
+        int threatLevel = calculateThreatLevel(immediateThreats, potentialThreats, maxThreatValue);
+
+        // Must defend if in check or facing winning threats
+        boolean mustDefend = inCheck || maxThreatValue >= 1000;
+
+        return new ThreatAnalysis(immediateThreats, potentialThreats, defensiveMoves,
+                threatLevel, inCheck, mustDefend);
     }
 
     /**
-     * DETECT CASTLE THREATS
+     * Analyze a single move for threats
      */
-    private static List<DetectedThreat> detectCastleThreats(GameState state) {
-        List<DetectedThreat> threats = new ArrayList<>();
+    private static Threat analyzeSingleMove(GameState state, Move move) {
+        long toBit = GameState.bit(move.to);
         boolean isRed = state.redToMove;
 
-        int ourCastle = isRed ? GameState.getIndex(6, 3) : GameState.getIndex(0, 3); // D7 or D1
+        // Check for guard capture threat
         long enemyGuard = isRed ? state.blueGuard : state.redGuard;
+        if ((enemyGuard & toBit) != 0) {
+            return new Threat(GUARD_THREAT, move, move.to, 2000, true);
+        }
 
-        if (enemyGuard != 0) {
-            int enemyGuardPos = Long.numberOfTrailingZeros(enemyGuard);
-            int distance = calculateManhattanDistance(enemyGuardPos, ourCastle);
+        // Check for castle reach threat
+        int enemyCastle = isRed ? GameState.getIndex(0, 3) : GameState.getIndex(6, 3);
+        if (move.to == enemyCastle && isGuardMove(move, state)) {
+            return new Threat(CASTLE_THREAT, move, move.to, 3000, true);
+        }
 
-            if (distance <= 3) {
-                ThreatLevel level = distance <= 1 ? ThreatLevel.CRITICAL :
-                        distance <= 2 ? ThreatLevel.SERIOUS : ThreatLevel.MODERATE;
-
-                String desc = String.format("Enemy guard %d moves from our castle", distance);
-                List<Move> defenses = findCastleDefenses(state, ourCastle);
-
-                threats.add(new DetectedThreat(ThreatType.CASTLE_THREAT, level,
-                        ourCastle, enemyGuardPos, null, desc, defenses));
+        // Check for material threats
+        if (isCapture(move, state)) {
+            int captureValue = getCaptureValue(move, state);
+            if (captureValue >= 200) { // Significant material
+                return new Threat(MATERIAL_THREAT, move, move.to, captureValue, true);
             }
         }
 
-        return threats;
-    }
-
-    /**
-     * DETECT MATERIAL THREATS
-     */
-    private static List<DetectedThreat> detectMaterialThreats(GameState state) {
-        List<DetectedThreat> threats = new ArrayList<>();
-        boolean isRed = state.redToMove;
-
-        // Find our pieces under attack
-        for (int square = 0; square < GameState.NUM_SQUARES; square++) {
-            int pieceValue = getPieceValue(square, state, isRed);
-            if (pieceValue == 0) continue;
-
-            List<Move> attacks = findAttacksOnSquare(square, state, !isRed);
-            if (attacks.isEmpty()) continue;
-
-            // Calculate if the piece is adequately defended
-            int defenseValue = calculateDefenseValue(square, state, isRed);
-            int attackValue = calculateAttackValue(attacks, state);
-
-            if (attackValue > defenseValue) {
-                ThreatLevel level = pieceValue >= 300 ? ThreatLevel.SERIOUS :
-                        pieceValue >= 150 ? ThreatLevel.MODERATE : ThreatLevel.MINOR;
-
-                String desc = String.format("Piece worth %d under insufficient protection", pieceValue);
-                List<Move> defenses = findPieceDefenses(state, square);
-
-                threats.add(new DetectedThreat(ThreatType.MATERIAL_LOSS, level,
-                        square, attacks.get(0).from, attacks.get(0), desc, defenses));
+        // Check for fork threats (attacking multiple pieces)
+        List<Integer> attackedSquares = getAttackedSquares(state, move);
+        if (attackedSquares.size() >= 2) {
+            int forkValue = evaluateFork(state, attackedSquares, !isRed);
+            if (forkValue >= 300) {
+                return new Threat(FORK_THREAT, move, move.to, forkValue, false);
             }
         }
 
-        return threats;
-    }
-
-    /**
-     * DETECT POSITIONAL THREATS
-     */
-    private static List<DetectedThreat> detectPositionalThreats(GameState state) {
-        List<DetectedThreat> threats = new ArrayList<>();
-
-        // Check for positional weaknesses
-        if (hasWeakGuardPosition(state)) {
-            threats.add(new DetectedThreat(ThreatType.POSITIONAL_THREAT, ThreatLevel.MODERATE,
-                    -1, -1, null, "Guard in vulnerable position", new ArrayList<>()));
+        // Check for discovered threats
+        Threat discoveredThreat = checkDiscoveredThreat(state, move);
+        if (discoveredThreat != null) {
+            return discoveredThreat;
         }
 
-        if (hasPoorPieceCoordination(state)) {
-            threats.add(new DetectedThreat(ThreatType.POSITIONAL_THREAT, ThreatLevel.MINOR,
-                    -1, -1, null, "Poor piece coordination", new ArrayList<>()));
-        }
-
-        return threats;
+        return null;
     }
 
     /**
-     * DETECT TACTICAL MOTIFS (forks, pins, skewers)
+     * Find moves that defend against threats
      */
-    private static List<DetectedThreat> detectTacticalMotifs(GameState state) {
-        List<DetectedThreat> threats = new ArrayList<>();
-
-        // Check for fork threats
-        threats.addAll(detectForkThreats(state));
-
-        // Check for pin/skewer threats
-        threats.addAll(detectPinThreats(state));
-
-        return threats;
-    }
-
-    // === DEFENSE FINDING METHODS ===
-
-    /**
-     * FIND DEFENSIVE MOVES for detected threats
-     */
-    private static List<Move> findDefensiveMoves(GameState state, List<DetectedThreat> threats) {
-        Set<Move> defensiveMoves = new HashSet<>();
-
-        for (DetectedThreat threat : threats) {
-            defensiveMoves.addAll(threat.defenses);
-        }
-
-        // Add general defensive moves
-        defensiveMoves.addAll(findGeneralDefensiveMoves(state));
-
-        return new ArrayList<>(defensiveMoves);
-    }
-
-    /**
-     * FIND IMMEDIATE DEFENSES for critical threats
-     */
-    private static List<Move> findImmediateDefenses(GameState state, List<DetectedThreat> threats) {
-        List<Move> immediateDefenses = new ArrayList<>();
-
-        for (DetectedThreat threat : threats) {
-            if (threat.level.value >= ThreatLevel.SERIOUS.value) {
-                immediateDefenses.addAll(threat.defenses);
-            }
-        }
-
-        return immediateDefenses;
-    }
-
-    /**
-     * FIND GUARD DEFENSES
-     */
-    private static List<Move> findGuardDefenses(GameState state, int guardPos, Move attack) {
-        List<Move> defenses = new ArrayList<>();
+    private static List<Move> findDefensiveMoves(GameState state, List<Threat> threats) {
+        List<Move> defensive = new ArrayList<>();
         List<Move> allMoves = MoveGenerator.generateAllMoves(state);
 
         for (Move move : allMoves) {
-            // 1. Move the guard away
-            if (move.from == guardPos) {
-                defenses.add(move);
-            }
-
-            // 2. Block the attack
-            if (canBlockAttack(move, attack, state)) {
-                defenses.add(move);
-            }
-
-            // 3. Counter-attack the attacker
-            if (move.to == attack.from) {
-                defenses.add(move);
+            if (defendsAgainstThreats(state, move, threats)) {
+                defensive.add(move);
             }
         }
 
-        return defenses;
+        // Sort defensive moves by effectiveness
+        defensive.sort((a, b) -> {
+            int scoreA = scoreDefensiveMove(state, a, threats);
+            int scoreB = scoreDefensiveMove(state, b, threats);
+            return Integer.compare(scoreB, scoreA);
+        });
+
+        return defensive;
+    }
+
+    /**
+     * Check if a move defends against threats
+     */
+    private static boolean defendsAgainstThreats(GameState state, Move move, List<Threat> threats) {
+        // Simulate the move
+        GameState afterMove = state.copy();
+        afterMove.applyMove(move);
+
+        // Re-analyze threats after the move
+        for (Threat threat : threats) {
+            if (threat.type == GUARD_THREAT) {
+                // Check if guard is still in danger
+                if (!isGuardStillThreatened(afterMove, threat)) {
+                    return true;
+                }
+            } else if (threat.type == CASTLE_THREAT) {
+                // Check if castle threat is blocked
+                if (blocksCastleThreat(move, threat)) {
+                    return true;
+                }
+            } else if (threat.type == MATERIAL_THREAT) {
+                // Check if piece is moved or defended
+                if (move.from == threat.targetSquare || defendsSquare(afterMove, threat.targetSquare)) {
+                    return true;
+                }
+            }
+        }
+
+        // Check if move creates counter-threat
+        if (createsCounterThreat(state, move, threats)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Score a defensive move
+     */
+    private static int scoreDefensiveMove(GameState state, Move move, List<Threat> threats) {
+        int score = 0;
+
+        // Bonus for moves that address multiple threats
+        int threatsAddressed = 0;
+        for (Threat threat : threats) {
+            if (addressesThreat(state, move, threat)) {
+                threatsAddressed++;
+                score += threat.threatValue / 2;
+            }
+        }
+
+        if (threatsAddressed > 1) {
+            score += 200; // Multi-purpose defense bonus
+        }
+
+        // Bonus for counter-threats
+        if (createsCounterThreat(state, move, threats)) {
+            score += 300;
+        }
+
+        // Penalty for passive moves
+        if (!isCapture(move, state) && !advancesPosition(move, state)) {
+            score -= 50;
+        }
+
+        return score;
+    }
+
+    /**
+     * Calculate overall threat level (0-10)
+     */
+    private static int calculateThreatLevel(List<Threat> immediate, List<Threat> potential, int maxValue) {
+        int level = 0;
+
+        // Immediate threats
+        level += Math.min(immediate.size() * 2, 6);
+
+        // Threat severity
+        if (maxValue >= 2000) level += 3; // Guard threat
+        else if (maxValue >= 1000) level += 2; // Major material
+        else if (maxValue >= 500) level += 1; // Minor material
+
+        // Multiple threats
+        if (immediate.size() >= 3) level += 1;
+
+        return Math.min(level, 10);
+    }
+
+    /**
+     * Check for null move threats (what opponent threatens if we pass)
+     */
+    public static ThreatAnalysis analyzeNullMoveThreats(GameState state) {
+        // Make a null move (just switch turn)
+        GameState nullState = state.copy();
+        nullState.redToMove = !nullState.redToMove;
+
+        // Analyze threats in null move position
+        return analyzeThreats(nullState);
+    }
+
+    /**
+     * Quick threat check for time-critical situations
+     */
+    public static boolean hasImmediateThreat(GameState state) {
+        // Switch perspective
+        GameState opponentView = state.copy();
+        opponentView.redToMove = !opponentView.redToMove;
+
+        List<Move> opponentMoves = MoveGenerator.generateAllMoves(opponentView);
+
+        for (Move move : opponentMoves) {
+            // Check for guard captures
+            if (capturesGuard(move, opponentView)) {
+                return true;
+            }
+
+            // Check for castle reaches
+            if (reachesCastle(move, opponentView)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // === HELPER METHODS ===
 
-    private static List<Move> findAttacksOnSquare(int square, GameState state, boolean byPlayer) {
-        List<Move> attacks = new ArrayList<>();
-        List<Move> allMoves = MoveGenerator.generateAllMoves(createStateForPlayer(state, byPlayer));
-
-        for (Move move : allMoves) {
-            if (move.to == square) {
-                attacks.add(move);
-            }
-        }
-
-        return attacks;
+    private static boolean isGuardMove(Move move, GameState state) {
+        long fromBit = GameState.bit(move.from);
+        return ((state.redGuard | state.blueGuard) & fromBit) != 0;
     }
 
-    private static GameState createStateForPlayer(GameState state, boolean forRed) {
-        GameState copy = state.copy();
-        copy.redToMove = forRed;
-        return copy;
+    private static boolean isCapture(Move move, GameState state) {
+        long toBit = GameState.bit(move.to);
+        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
     }
 
-    private static int getPieceValue(int square, GameState state, boolean isRed) {
-        long bit = GameState.bit(square);
-
-        // Check guard
-        long guard = isRed ? state.redGuard : state.blueGuard;
-        if ((guard & bit) != 0) return 1500;
-
-        // Check towers
-        int height = isRed ? state.redStackHeights[square] : state.blueStackHeights[square];
-        return height * 100;
-    }
-
-    private static int calculateDefenseValue(int square, GameState state, boolean isRed) {
-        List<Move> defenses = findAttacksOnSquare(square, state, isRed);
-        return defenses.size() * 100; // Simplified defense calculation
-    }
-
-    private static int calculateAttackValue(List<Move> attacks, GameState state) {
-        return attacks.size() * 100; // Simplified attack calculation
-    }
-
-    private static List<Move> findPieceDefenses(GameState state, int square) {
-        List<Move> defenses = new ArrayList<>();
-        List<Move> allMoves = MoveGenerator.generateAllMoves(state);
-
-        for (Move move : allMoves) {
-            // Move that defend this square
-            if (canDefendSquare(move, square, state)) {
-                defenses.add(move);
-            }
-        }
-
-        return defenses;
-    }
-
-    private static List<Move> findCastleDefenses(GameState state, int castle) {
-        List<Move> defenses = new ArrayList<>();
-        List<Move> allMoves = MoveGenerator.generateAllMoves(state);
-
-        for (Move move : allMoves) {
-            // Moves that help protect the castle
-            if (move.to == castle || isAdjacentToSquare(move.to, castle)) {
-                defenses.add(move);
-            }
-        }
-
-        return defenses;
-    }
-
-    private static List<Move> findGeneralDefensiveMoves(GameState state) {
-        List<Move> defensiveMoves = new ArrayList<>();
-        List<Move> allMoves = MoveGenerator.generateAllMoves(state);
-
-        for (Move move : allMoves) {
-            if (isDefensiveMove(move, state)) {
-                defensiveMoves.add(move);
-            }
-        }
-
-        return defensiveMoves;
-    }
-
-    // === TACTICAL PATTERN DETECTION ===
-
-    private static List<DetectedThreat> detectForkThreats(GameState state) {
-        List<DetectedThreat> forkThreats = new ArrayList<>();
-
-        // Check if enemy can fork our pieces
-        GameState enemyState = createStateForPlayer(state, !state.redToMove);
-        List<Move> enemyMoves = MoveGenerator.generateAllMoves(enemyState);
-
-        for (Move move : enemyMoves) {
-            int threatsCount = countThreatsFromSquare(move.to, state, !state.redToMove);
-            if (threatsCount >= 2) {
-                forkThreats.add(new DetectedThreat(ThreatType.TACTICAL_MOTIF, ThreatLevel.SERIOUS,
-                        move.to, move.from, move, "Fork threat detected", new ArrayList<>()));
-            }
-        }
-
-        return forkThreats;
-    }
-
-    private static List<DetectedThreat> detectPinThreats(GameState state) {
-        // Simplified pin detection for Guard & Towers
-        List<DetectedThreat> pinThreats = new ArrayList<>();
-
-        // In Guard & Towers, pins occur when a piece cannot move because
-        // it would expose the guard to attack
-
-        // TODO: Implement specific pin detection logic for Guard & Towers rules
-
-        return pinThreats;
-    }
-
-    // === POSITIONAL ANALYSIS ===
-
-    private static boolean hasWeakGuardPosition(GameState state) {
+    private static int getCaptureValue(Move move, GameState state) {
+        long toBit = GameState.bit(move.to);
         boolean isRed = state.redToMove;
-        long guard = isRed ? state.redGuard : state.blueGuard;
 
-        if (guard == 0) return false;
+        if ((isRed && (state.blueGuard & toBit) != 0) || (!isRed && (state.redGuard & toBit) != 0)) {
+            return 2000;
+        }
 
-        int guardPos = Long.numberOfTrailingZeros(guard);
-        int adjacentFriendly = countAdjacentFriendlyPieces(guardPos, state, isRed);
+        if (isRed && (state.blueTowers & toBit) != 0) {
+            return state.blueStackHeights[move.to] * 100;
+        } else if (!isRed && (state.redTowers & toBit) != 0) {
+            return state.redStackHeights[move.to] * 100;
+        }
 
-        return adjacentFriendly == 0; // Guard has no support
+        return 0;
     }
 
-    private static boolean hasPoorPieceCoordination(GameState state) {
-        boolean isRed = state.redToMove;
-        int isolatedPieces = 0;
-        int totalPieces = 0;
+    private static List<Integer> getAttackedSquares(GameState state, Move move) {
+        List<Integer> attacked = new ArrayList<>();
+        int from = move.to; // After the move
+        int range = move.amountMoved;
 
-        for (int square = 0; square < GameState.NUM_SQUARES; square++) {
-            if (getPieceValue(square, state, isRed) > 0) {
-                totalPieces++;
-                if (countAdjacentFriendlyPieces(square, state, isRed) == 0) {
-                    isolatedPieces++;
+        // Check all four directions
+        int[] directions = {-1, 1, -7, 7};
+        for (int dir : directions) {
+            for (int dist = 1; dist <= range; dist++) {
+                int target = from + dir * dist;
+                if (!GameState.isOnBoard(target)) break;
+
+                // Check for rank wrap
+                if (Math.abs(dir) == 1 && GameState.rank(from) != GameState.rank(target)) break;
+
+                long targetBit = GameState.bit(target);
+                boolean isRed = state.redToMove;
+
+                // Check if enemy piece
+                if ((isRed && ((state.blueTowers | state.blueGuard) & targetBit) != 0) ||
+                        (!isRed && ((state.redTowers | state.redGuard) & targetBit) != 0)) {
+                    attacked.add(target);
+                }
+
+                // Stop if blocked
+                if (((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & targetBit) != 0) {
+                    break;
                 }
             }
         }
 
-        return totalPieces > 0 && (double)isolatedPieces / totalPieces > 0.5;
+        return attacked;
     }
 
-    // === UTILITY METHODS ===
+    private static int evaluateFork(GameState state, List<Integer> targets, boolean attackingRed) {
+        int totalValue = 0;
 
-    private static int countThreatsFromSquare(int square, GameState state, boolean byPlayer) {
-        int threats = 0;
-        long enemyPieces = byPlayer ?
-                (state.blueTowers | state.blueGuard) : (state.redTowers | state.redGuard);
+        for (int square : targets) {
+            long bit = GameState.bit(square);
+
+            if (attackingRed) {
+                if ((state.blueGuard & bit) != 0) totalValue += 2000;
+                else if ((state.blueTowers & bit) != 0) totalValue += state.blueStackHeights[square] * 100;
+            } else {
+                if ((state.redGuard & bit) != 0) totalValue += 2000;
+                else if ((state.redTowers & bit) != 0) totalValue += state.redStackHeights[square] * 100;
+            }
+        }
+
+        // Fork value is based on the two most valuable targets
+        return totalValue;
+    }
+
+    private static Threat checkDiscoveredThreat(GameState state, Move move) {
+        // TODO: Implement discovered threat detection
+        // This would check if moving a piece reveals an attack from another piece
+        return null;
+    }
+
+    private static boolean isGuardStillThreatened(GameState state, Threat threat) {
+        // Re-check if the guard can still be captured
+        boolean isRed = !state.redToMove; // We switched turns
+        long guardBit = isRed ? state.redGuard : state.blueGuard;
+
+        if (guardBit == 0) return false; // Guard already captured
+
+        int guardPos = Long.numberOfTrailingZeros(guardBit);
+
+        // Check if the threatening piece can still capture the guard
+        return canPieceAttackSquare(state, threat.attackingMove.from, guardPos);
+    }
+
+    private static boolean blocksCastleThreat(Move move, Threat threat) {
+        // Check if move blocks path to castle
+        return move.to == threat.targetSquare ||
+                isOnPath(threat.attackingMove.from, threat.targetSquare, move.to);
+    }
+
+    private static boolean defendsSquare(GameState state, int square) {
+        // Check if square is defended by friendly pieces
+        boolean isRed = state.redToMove;
 
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            if ((enemyPieces & GameState.bit(i)) != 0) {
-                if (canAttackFromTo(square, i, state, byPlayer)) {
-                    threats++;
+            if (isRed) {
+                if ((state.redStackHeights[i] > 0 || (state.redGuard & GameState.bit(i)) != 0) &&
+                        canPieceAttackSquare(state, i, square)) {
+                    return true;
+                }
+            } else {
+                if ((state.blueStackHeights[i] > 0 || (state.blueGuard & GameState.bit(i)) != 0) &&
+                        canPieceAttackSquare(state, i, square)) {
+                    return true;
                 }
             }
         }
 
-        return threats;
+        return false;
     }
 
-    private static int countAdjacentFriendlyPieces(int square, GameState state, boolean isRed) {
-        int count = 0;
-        int[] directions = {-1, 1, -7, 7};
+    private static boolean createsCounterThreat(GameState state, Move move, List<Threat> threats) {
+        // Simulate move and check for counter-threats
+        GameState afterMove = state.copy();
+        afterMove.applyMove(move);
 
-        for (int dir : directions) {
-            int adjacent = square + dir;
-            if (GameState.isOnBoard(adjacent) && !isRankWrap(square, adjacent, dir)) {
-                if (getPieceValue(adjacent, state, isRed) > 0) {
-                    count++;
-                }
+        // Check if we threaten enemy guard or create winning threat
+        List<Move> ourMoves = MoveGenerator.generateAllMoves(afterMove);
+
+        for (Move ourMove : ourMoves) {
+            if (capturesGuard(ourMove, afterMove) || reachesCastle(ourMove, afterMove)) {
+                return true;
             }
         }
 
-        return count;
+        return false;
     }
 
-    private static boolean canBlockAttack(Move blockingMove, Move attack, GameState state) {
-        // Check if the blocking move places a piece between attacker and target
-        return isOnPath(blockingMove.to, attack.from, attack.to);
+    private static boolean addressesThreat(GameState state, Move move, Threat threat) {
+        // Check if move addresses specific threat
+        return move.from == threat.targetSquare || // Move threatened piece
+                move.to == threat.attackingMove.to || // Block/capture attacker
+                defendsSquare(state, threat.targetSquare); // Add defender
     }
 
-    private static boolean canDefendSquare(Move move, int square, GameState state) {
-        // Check if the move helps defend the square
-        return isAdjacentToSquare(move.to, square) || move.to == square;
-    }
-
-    private static boolean isDefensiveMove(Move move, GameState state) {
-        // Simplified: moves that bring pieces closer to our guard
+    private static boolean advancesPosition(Move move, GameState state) {
         boolean isRed = state.redToMove;
-        long guard = isRed ? state.redGuard : state.blueGuard;
+        int fromRank = GameState.rank(move.from);
+        int toRank = GameState.rank(move.to);
 
-        if (guard == 0) return false;
-
-        int guardPos = Long.numberOfTrailingZeros(guard);
-        int oldDistance = calculateManhattanDistance(move.from, guardPos);
-        int newDistance = calculateManhattanDistance(move.to, guardPos);
-
-        return newDistance < oldDistance;
+        return (isRed && toRank < fromRank) || (!isRed && toRank > fromRank);
     }
 
-    private static boolean canAttackFromTo(int from, int to, GameState state, boolean byPlayer) {
-        int range = 1; // Default for guards
+    private static boolean capturesGuard(Move move, GameState state) {
+        long toBit = GameState.bit(move.to);
+        boolean isRed = state.redToMove;
+        return (isRed && (state.blueGuard & toBit) != 0) || (!isRed && (state.redGuard & toBit) != 0);
+    }
 
-        if (byPlayer) {
-            if (state.redStackHeights[from] > 0) range = state.redStackHeights[from];
-        } else {
-            if (state.blueStackHeights[from] > 0) range = state.blueStackHeights[from];
+    private static boolean reachesCastle(Move move, GameState state) {
+        if (!isGuardMove(move, state)) return false;
+        int targetCastle = state.redToMove ? GameState.getIndex(0, 3) : GameState.getIndex(6, 3);
+        return move.to == targetCastle;
+    }
+
+    private static boolean canPieceAttackSquare(GameState state, int from, int to) {
+        int range = 1; // Default for guard
+
+        if (state.redStackHeights[from] > 0) {
+            range = state.redStackHeights[from];
+        } else if (state.blueStackHeights[from] > 0) {
+            range = state.blueStackHeights[from];
         }
 
         int rankDiff = Math.abs(GameState.rank(from) - GameState.rank(to));
         int fileDiff = Math.abs(GameState.file(from) - GameState.file(to));
 
         if (rankDiff != 0 && fileDiff != 0) return false;
-        return Math.max(rankDiff, fileDiff) <= range;
+
+        int distance = Math.max(rankDiff, fileDiff);
+        return distance <= range && isPathClear(state, from, to);
     }
 
-    private static boolean isOnPath(int point, int start, int end) {
-        // Check if point lies on the path from start to end
-        int startRank = GameState.rank(start);
-        int startFile = GameState.file(start);
-        int endRank = GameState.rank(end);
-        int endFile = GameState.file(end);
-        int pointRank = GameState.rank(point);
-        int pointFile = GameState.file(point);
+    private static boolean isPathClear(GameState state, int from, int to) {
+        int rankDiff = GameState.rank(to) - GameState.rank(from);
+        int fileDiff = GameState.file(to) - GameState.file(from);
 
-        // Must be on same line
-        if (startRank == endRank && pointRank == startRank) {
-            int minFile = Math.min(startFile, endFile);
-            int maxFile = Math.max(startFile, endFile);
-            return pointFile > minFile && pointFile < maxFile;
-        } else if (startFile == endFile && pointFile == startFile) {
-            int minRank = Math.min(startRank, endRank);
-            int maxRank = Math.max(startRank, endRank);
-            return pointRank > minRank && pointRank < maxRank;
+        if (rankDiff != 0 && fileDiff != 0) return false;
+
+        int step = rankDiff != 0 ? (rankDiff > 0 ? 7 : -7) : (fileDiff > 0 ? 1 : -1);
+        int current = from + step;
+
+        while (current != to) {
+            long bit = GameState.bit(current);
+            if ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & bit) != 0) {
+                return false;
+            }
+            current += step;
         }
 
-        return false;
+        return true;
     }
 
-    private static boolean isAdjacentToSquare(int square1, int square2) {
-        int rankDiff = Math.abs(GameState.rank(square1) - GameState.rank(square2));
-        int fileDiff = Math.abs(GameState.file(square1) - GameState.file(square2));
-        return (rankDiff + fileDiff) == 1;
-    }
+    private static boolean isOnPath(int from, int to, int check) {
+        int rankDiff = GameState.rank(to) - GameState.rank(from);
+        int fileDiff = GameState.file(to) - GameState.file(from);
 
-    private static boolean isRankWrap(int from, int to, int direction) {
-        if (Math.abs(direction) == 1) {
-            return GameState.rank(from) != GameState.rank(to);
+        if (rankDiff != 0 && fileDiff != 0) return false;
+
+        // Check if 'check' is between from and to
+        int checkRank = GameState.rank(check);
+        int checkFile = GameState.file(check);
+        int fromRank = GameState.rank(from);
+        int fromFile = GameState.file(from);
+        int toRank = GameState.rank(to);
+        int toFile = GameState.file(to);
+
+        if (rankDiff == 0) { // Same rank
+            return checkRank == fromRank &&
+                    checkFile >= Math.min(fromFile, toFile) &&
+                    checkFile <= Math.max(fromFile, toFile);
+        } else { // Same file
+            return checkFile == fromFile &&
+                    checkRank >= Math.min(fromRank, toRank) &&
+                    checkRank <= Math.max(fromRank, toRank);
         }
-        return false;
-    }
-
-    private static int calculateManhattanDistance(int from, int to) {
-        int rankDiff = Math.abs(GameState.rank(from) - GameState.rank(to));
-        int fileDiff = Math.abs(GameState.file(from) - GameState.file(to));
-        return rankDiff + fileDiff;
-    }
-
-    private static String squareName(int square) {
-        char file = (char) ('A' + GameState.file(square));
-        int rank = GameState.rank(square) + 1;
-        return "" + file + rank;
     }
 }

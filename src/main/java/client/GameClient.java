@@ -3,7 +3,6 @@ package client;
 import java.util.List;
 
 import GaT.search.MoveGenerator;
-import GaT.search.PVSSearch;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.SearchConfig;
@@ -17,14 +16,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
 /**
- * PHASE 1 FIXED GAME CLIENT - Ultra-aggressive with enhanced safety
- *
- * PHASE 1 FIXES:
- * ✅ 1. Reset search state for clean starts
- * ✅ 2. Conservative time allocation with safety buffer
- * ✅ 3. Multi-level fallback system
- * ✅ 4. Enhanced exception handling
- * ✅ 5. Quick evaluation fallback method
+ * FIXED GAME CLIENT - Ultra-aggressive with tactical awareness
  */
 public class GameClient {
     private static final Gson gson = new Gson();
@@ -115,14 +107,11 @@ public class GameClient {
     }
 
     /**
-     * PHASE 1 FIXED: Ultra-aggressive AI move calculation with enhanced safety
+     * Ultra-aggressive AI move calculation with all fixes
      */
     private static String getUltraAggressiveAIMove(String board, int player, long timeLeft) {
         try {
             GameState state = GameState.fromFen(board);
-
-            // PHASE 1 FIX: Reset search state for clean start
-            PVSSearch.resetSearchState();
 
             // Update all components with remaining time
             timeManager.updateRemainingTime(timeLeft);
@@ -133,14 +122,9 @@ public class GameClient {
             // Get aggressive time allocation
             long timeForMove = timeManager.calculateTimeForMove(state);
 
-            // PHASE 1 FIX: Conservative time allocation with safety buffer
-            long safeTimeForMove = Math.min(timeForMove, timeLeft / 6); // Never more than 1/6 of remaining
-
             System.out.println("🧠 ULTRA-AGGRESSIVE AI Analysis:");
             System.out.printf("   ⏰ Time allocated: %dms (%.1f%% of remaining)%n",
                     timeForMove, 100.0 * timeForMove / timeLeft);
-            System.out.printf("   🛡️ Safety time: %dms (%.1f%% of remaining)%n",
-                    safeTimeForMove, 100.0 * safeTimeForMove / timeLeft);
             System.out.println("   🎯 Strategy: PVS + Quiescence (ULTIMATE)");
             System.out.println("   📊 Evaluator: TacticalEvaluator");
             System.out.println("   🎮 Phase: " + timeManager.getCurrentPhase());
@@ -150,64 +134,27 @@ public class GameClient {
 
             long searchStartTime = System.currentTimeMillis();
 
-            // PHASE 1 FIX: Enhanced exception handling with multi-level fallback
-            Move bestMove = null;
-
-            try {
-                // Use conservative time allocation
-                bestMove = TimedMinimax.findBestMoveWithStrategy(
-                        state, 99, safeTimeForMove, SearchConfig.SearchStrategy.PVS_Q);
-
-            } catch (Exception e) {
-                System.out.println("❌ Primary search failed: " + e.getMessage());
-
-                // Fallback 1: Try with even less time and alpha-beta
-                try {
-                    System.out.println("🔄 Trying fallback search...");
-                    bestMove = TimedMinimax.findBestMoveWithStrategy(
-                            state, 5, safeTimeForMove / 2, SearchConfig.SearchStrategy.ALPHA_BETA);
-                } catch (Exception e2) {
-                    System.out.println("❌ Fallback search failed: " + e2.getMessage());
-                    bestMove = null;
-                }
-            }
+            // Use PVS + Quiescence with aggressive depth
+            int maxDepth = 99; // Let time management decide actual depth
+            Move bestMove = TimedMinimax.findBestMoveWithStrategy(
+                    state, maxDepth, timeForMove, SearchConfig.SearchStrategy.PVS_Q);
 
             long searchTime = System.currentTimeMillis() - searchStartTime;
 
             // Validate move
             List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
 
-            // PHASE 1 FIX: Multi-level fallback system
             if (bestMove == null || !legalMoves.contains(bestMove)) {
-                System.out.println("⚠️ WARNING: Invalid move! Using multi-level fallback...");
-
-                // Fallback Level 1: Tactical fallback
-                try {
-                    bestMove = findTacticalFallback(state, legalMoves);
-                } catch (Exception e) {
-                    System.out.println("❌ Tactical fallback failed: " + e.getMessage());
-                    bestMove = null;
-                }
-
-                // Fallback Level 2: Quick evaluation
-                if (bestMove == null) {
-                    System.out.println("🆘 Using quick evaluation fallback...");
-                    bestMove = findQuickEvaluationMove(state, legalMoves);
-                }
-
-                // Fallback Level 3: First legal move
-                if (bestMove == null && !legalMoves.isEmpty()) {
-                    System.out.println("💀 Ultimate fallback - first legal move");
-                    bestMove = legalMoves.get(0);
-                }
+                System.out.println("⚠️ WARNING: Invalid move! Using tactical fallback...");
+                bestMove = findTacticalFallback(state, legalMoves);
             }
 
             // Enhanced logging
             System.out.printf("   ✅ Search completed in: %dms (%.1f%% of allocated)%n",
-                    searchTime, 100.0 * searchTime / safeTimeForMove);
+                    searchTime, 100.0 * searchTime / timeForMove);
 
             // Time efficiency analysis
-            double efficiency = (double)searchTime / safeTimeForMove;
+            double efficiency = (double)searchTime / timeForMove;
             if (efficiency < 0.5) {
                 System.out.println("   ⚡ Could have used more time");
             } else if (efficiency > 0.9) {
@@ -223,39 +170,6 @@ public class GameClient {
             e.printStackTrace();
             return getEmergencyFallback(board);
         }
-    }
-
-    /**
-     * PHASE 1 NEW: Quick evaluation fallback method
-     */
-    private static Move findQuickEvaluationMove(GameState state, List<Move> legalMoves) {
-        if (legalMoves.isEmpty()) return null;
-
-        Move bestMove = legalMoves.get(0);
-        int bestScore = Integer.MIN_VALUE;
-        boolean isRed = state.redToMove;
-
-        // Quick 1-ply evaluation of all moves
-        for (Move move : legalMoves) {
-            try {
-                GameState copy = state.copy();
-                copy.applyMove(move);
-
-                // Simple evaluation without deep search
-                int score = evaluator.evaluate(copy, 0);
-
-                if ((isRed && score > bestScore) || (!isRed && score < bestScore)) {
-                    bestScore = score;
-                    bestMove = move;
-                }
-            } catch (Exception e) {
-                // Continue with other moves
-                continue;
-            }
-        }
-
-        System.out.println("   📊 Quick eval selected: " + bestMove + " (score: " + bestScore + ")");
-        return bestMove;
     }
 
     /**
