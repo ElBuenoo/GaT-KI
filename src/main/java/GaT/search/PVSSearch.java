@@ -193,8 +193,7 @@ public class PVSSearch {
     /**
      * PVS with Quiescence Search Integration - FIXED
      */
-    public static int searchWithQuiescence(GameState state, int depth, int alpha, int beta,
-                                           boolean maximizingPlayer, boolean isPVNode) {
+    public static int searchWithQuiescence(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer, boolean isPVNode) {
 
         statistics.incrementNodeCount(); // FIXED: Proper node counting
 

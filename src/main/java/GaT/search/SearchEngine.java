@@ -46,9 +46,7 @@ public class SearchEngine {
     /**
      * PHASE 2 FIXED: Enhanced error handling with timeout distinction
      */
-    public int search(GameState state, int depth, int alpha, int beta,
-                      boolean maximizingPlayer, SearchConfig.SearchStrategy strategy) {
-
+    public int search(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer, SearchConfig.SearchStrategy strategy) {
         if (strategy == null) {
             System.err.println("⚠️ Null strategy provided, defaulting to ALPHA_BETA");
             strategy = SearchConfig.SearchStrategy.ALPHA_BETA;

@@ -546,7 +546,8 @@ public class GameClient {
 
     private static boolean isCapture(Move move, GameState state) {
         long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
+        long pieces = state.redToMove ? (state.blueTowers | state.blueGuard) : (state.redTowers | state.redGuard);
+        return (pieces & toBit) != 0;
     }
 
     private static int getCaptureValue(Move move, GameState state) {

@@ -240,19 +240,9 @@ public class Minimax {
      */
     public static boolean isCapture(Move move, GameState state) {
         if (state == null) return false;
-
         long toBit = GameState.bit(move.to);
-        boolean isRed = state.redToMove;
-
-        boolean capturesGuard = isRed ?
-                (state.blueGuard & toBit) != 0 :
-                (state.redGuard & toBit) != 0;
-
-        boolean capturesTower = isRed ?
-                (state.blueTowers & toBit) != 0 :
-                (state.redTowers & toBit) != 0;
-
-        return capturesGuard || capturesTower;
+        long pieces = state.redToMove ? (state.blueTowers | state.blueGuard) : (state.redTowers | state.redGuard);
+        return (pieces & toBit) != 0;
     }
 
     /**

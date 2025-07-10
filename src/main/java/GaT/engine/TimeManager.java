@@ -66,7 +66,7 @@ public class TimeManager {
         switch (phase) {
             case OPENING:
                 if (moveNumber <= 10) {
-                    baseTime = baseTime * 2 / 3; // Less time in early opening
+                    baseTime = baseTime; // Less time in early opening
                 }
                 break;
 
@@ -247,8 +247,7 @@ public class TimeManager {
             }
         }
 
-        return (redGuardRow >= 0 && redGuardRow >= 4) ||
-                (blueGuardRow >= 0 && blueGuardRow <= 2);
+        return (redGuardRow <=4) || (blueGuardRow >= 4);        //Everything from the middle into enemy space counts as advanced
     }
 
     private boolean isGuardInDanger(GameState state) {
@@ -300,7 +299,10 @@ public class TimeManager {
 
     private boolean isCapture(Move move, GameState state) {
         long toBit = GameState.bit(move.to);
-        return ((state.redTowers | state.blueTowers | state.redGuard | state.blueGuard) & toBit) != 0;
+        if(state.redToMove){
+            return ((state.blueGuard | state.blueTowers) & toBit) !=0;
+        }
+        return ((state.redGuard | state.redTowers) & toBit) !=0;
     }
 
     // Public interface

@@ -44,15 +44,13 @@ public class TimedMinimax {
         return findBestMoveFixed(state, maxDepth, timeMillis, SearchConfig.SearchStrategy.PVS_Q);
     }
 
-    public static Move findBestMoveWithStrategy(GameState state, int maxDepth, long timeMillis,
-                                                SearchConfig.SearchStrategy strategy) {
+    public static Move findBestMoveWithStrategy(GameState state, int maxDepth, long timeMillis, SearchConfig.SearchStrategy strategy) {
         return findBestMoveFixed(state, maxDepth, timeMillis, strategy);
     }
 
     // === CORE FIXED SEARCH ===
 
-    private static Move findBestMoveFixed(GameState state, int maxDepth, long timeMillis,
-                                          SearchConfig.SearchStrategy strategy) {
+    private static Move findBestMoveFixed(GameState state, int maxDepth, long timeMillis, SearchConfig.SearchStrategy strategy) {
         if (state == null) {
             System.err.println("❌ CRITICAL: Null game state!");
             return null;
@@ -73,7 +71,7 @@ public class TimedMinimax {
             return null;
         }
 
-        Move bestMove = legalMoves.get(0); // Emergency fallback
+        Move bestMove = legalMoves.getFirst(); // Emergency fallback
         Move lastCompletedMove = bestMove;
         int bestScore = Integer.MIN_VALUE;
         int bestDepth = 0;
@@ -281,6 +279,7 @@ public class TimedMinimax {
         System.out.println("🔧 Search initialized with " + currentStrategy + " - ULTRA-AGGRESSIVE MODE");
     }
 
+    //Add better move ordering heuristics as in the prev versions
     private static void orderMoves(List<Move> moves, GameState state, int depth) {
         if (moves.size() <= 1) return;
 
