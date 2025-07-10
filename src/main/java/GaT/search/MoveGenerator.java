@@ -16,7 +16,18 @@ public class MoveGenerator {
             generateGuardMoves(state.blueGuard, state, false, moves);
             generateTowerMoves(state.blueTowers, state.blueStackHeights, state, false, moves);
         }
-        return moves;
+
+        // FILTER OUT INVALID MOVES
+        List<Move> validMoves = new ArrayList<>();
+        for (Move move : moves) {
+            if (isValidMove(move, state)) {
+                validMoves.add(move);
+            } else {
+                System.err.println("⚠️ Filtered invalid move: " + move);
+            }
+        }
+
+        return validMoves;
     }
 
     private static void generateGuardMoves(long guardBit, GameState state, boolean isRed, List<Move> moves) {
@@ -76,11 +87,79 @@ public class MoveGenerator {
     }
 
     private static boolean isEdgeWrap(int from, int to, int direction) {
-        // Only horizontal moves can wrap around board edges
-        if (Math.abs(direction) == 1) { // Horizontal movement (-1 or +1)
-            return GameState.rank(from) != GameState.rank(to);
+        // Get rank and file for both squares
+        int fromRank = GameState.rank(from);
+        int toRank = GameState.rank(to);
+        int fromFile = GameState.file(from);
+        int toFile = GameState.file(to);
+
+        // For horizontal moves (direction = -1 or +1)
+        if (Math.abs(direction) == 1) {
+            // If ranks are different, it's definitely edge wrapping
+            if (fromRank != toRank) {
+                return true;
+            }
+
+            // Additional check: file difference should be exactly 1 for valid horizontal moves
+            int fileDiff = Math.abs(toFile - fromFile);
+            if (fileDiff != 1) {
+                return true; // Invalid horizontal move
+            }
+
+            // Check for wrap from A-file to G-file or vice versa
+            if ((fromFile == 0 && toFile == 6) || (fromFile == 6 && toFile == 0)) {
+                return true;
+            }
         }
-        return false; // Vertical moves (-7 or +7) cannot edge wrap
+
+        // For vertical moves (direction = -7 or +7)
+        if (Math.abs(direction) == GameState.BOARD_SIZE) {
+            // Files must be the same for vertical moves
+            if (fromFile != toFile) {
+                return true;
+            }
+
+            // Rank difference should be exactly 1
+            int rankDiff = Math.abs(toRank - fromRank);
+            if (rankDiff != 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean isValidMove(Move move, GameState state) {
+        // Basic checks
+        if (move == null) return false;
+        if (move.from < 0 || move.from >= GameState.NUM_SQUARES) return false;
+        if (move.to < 0 || move.to >= GameState.NUM_SQUARES) return false;
+        if (move.amountMoved <= 0 || move.amountMoved > 7) return false;
+        if (move.from == move.to) return false;
+
+        // Check for edge wrapping
+        int fromRank = GameState.rank(move.from);
+        int toRank = GameState.rank(move.to);
+        int fromFile = GameState.file(move.from);
+        int toFile = GameState.file(move.to);
+
+        // Moves must be in straight lines
+        if (fromRank != toRank && fromFile != toFile) {
+            return false; // Diagonal moves not allowed
+        }
+
+        // Check for edge wrapping
+        if (fromRank == toRank) { // Horizontal move
+            if (Math.abs(fromFile - toFile) != Math.abs(move.to - move.from)) {
+                return false; // File difference doesn't match square difference
+            }
+        } else { // Vertical move
+            if (Math.abs(fromRank - toRank) * GameState.BOARD_SIZE != Math.abs(move.to - move.from)) {
+                return false; // Rank difference doesn't match square difference
+            }
+        }
+
+        return true;
     }
 
 

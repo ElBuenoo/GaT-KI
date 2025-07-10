@@ -291,6 +291,172 @@ public class GameClient {
                 redMaterial, blueMaterial, redMaterial - blueMaterial);
     }
 
+    private static boolean validateMoveComprehensively(Move move, GameState state) {
+        System.out.println("🔍 VALIDATING MOVE: " + move);
+
+        // 1. Basic null check
+        if (move == null) {
+            System.err.println("❌ Move is null!");
+            return false;
+        }
+
+        // 2. Board boundary checks
+        if (!GameState.isOnBoard(move.from)) {
+            System.err.println("❌ Source position off board: " + move.from);
+            return false;
+        }
+
+        if (!GameState.isOnBoard(move.to)) {
+            System.err.println("❌ Destination position off board: " + move.to);
+            return false;
+        }
+
+        // 3. Amount moved validation
+        if (move.amountMoved <= 0) {
+            System.err.println("❌ Invalid amount moved: " + move.amountMoved);
+            return false;
+        }
+
+        if (move.amountMoved > 7) {
+            System.err.println("❌ Amount moved too large: " + move.amountMoved);
+            return false;
+        }
+
+        // 4. Source and destination must be different
+        if (move.from == move.to) {
+            System.err.println("❌ Source and destination are the same: " + move.from);
+            return false;
+        }
+
+        // 5. Check if we have a piece at source
+        boolean hasRedPiece = (state.redGuard & GameState.bit(move.from)) != 0 ||
+                (state.redTowers & GameState.bit(move.from)) != 0;
+        boolean hasBluePiece = (state.blueGuard & GameState.bit(move.from)) != 0 ||
+                (state.blueTowers & GameState.bit(move.from)) != 0;
+
+        if (state.redToMove && !hasRedPiece) {
+            System.err.println("❌ Red to move but no red piece at source: " + move.from);
+            printSquareContents(move.from, state);
+            return false;
+        }
+
+        if (!state.redToMove && !hasBluePiece) {
+            System.err.println("❌ Blue to move but no blue piece at source: " + move.from);
+            printSquareContents(move.from, state);
+            return false;
+        }
+
+        // 6. Guard move validation
+        if (move.amountMoved == 1) {
+            boolean isGuardMove = (state.redToMove && (state.redGuard & GameState.bit(move.from)) != 0) ||
+                    (!state.redToMove && (state.blueGuard & GameState.bit(move.from)) != 0);
+
+            if (isGuardMove) {
+                // Guard moves must be adjacent (distance 1)
+                int distance = Math.max(
+                        Math.abs(GameState.rank(move.from) - GameState.rank(move.to)),
+                        Math.abs(GameState.file(move.from) - GameState.file(move.to))
+                );
+
+                if (distance != 1) {
+                    System.err.println("❌ Guard move not adjacent. Distance: " + distance);
+                    return false;
+                }
+
+                // Check for edge wrapping
+                if (isHorizontalEdgeWrap(move.from, move.to)) {
+                    System.err.println("❌ Guard move would wrap around board edge");
+                    return false;
+                }
+            }
+        }
+
+        // 7. Tower move validation
+        if (move.amountMoved > 1) {
+            boolean isTowerMove = (state.redToMove && (state.redTowers & GameState.bit(move.from)) != 0) ||
+                    (!state.redToMove && (state.blueTowers & GameState.bit(move.from)) != 0);
+
+            if (isTowerMove) {
+                // Check tower height
+                int towerHeight = state.redToMove ? state.redStackHeights[move.from] : state.blueStackHeights[move.from];
+
+                if (move.amountMoved > towerHeight) {
+                    System.err.println("❌ Trying to move more pieces than tower height. Tower: " + towerHeight + ", Move: " + move.amountMoved);
+                    return false;
+                }
+
+                // Check if move is in straight line
+                if (!isStraightLineMove(move.from, move.to)) {
+                    System.err.println("❌ Tower move not in straight line");
+                    return false;
+                }
+
+                // Check for edge wrapping in tower moves
+                if (isHorizontalEdgeWrap(move.from, move.to)) {
+                    System.err.println("❌ Tower move would wrap around board edge");
+                    return false;
+                }
+            }
+        }
+
+        // 8. Check if move is in legal move list
+        List<Move> legalMoves = MoveGenerator.generateAllMoves(state);
+        if (!legalMoves.contains(move)) {
+            System.err.println("❌ Move not in legal move list!");
+            System.err.println("📋 Legal moves (" + legalMoves.size() + "):");
+            for (int i = 0; i < Math.min(10, legalMoves.size()); i++) {
+                System.err.println("   " + i + ": " + legalMoves.get(i));
+            }
+            if (legalMoves.size() > 10) {
+                System.err.println("   ... and " + (legalMoves.size() - 10) + " more");
+            }
+            return false;
+        }
+
+        System.out.println("✅ Move validation passed!");
+        return true;
+    }
+
+    private static void printSquareContents(int square, GameState state) {
+        System.err.println("Square " + square + " contents:");
+        System.err.println("  Red guard: " + ((state.redGuard & GameState.bit(square)) != 0));
+        System.err.println("  Blue guard: " + ((state.blueGuard & GameState.bit(square)) != 0));
+        System.err.println("  Red tower: " + ((state.redTowers & GameState.bit(square)) != 0));
+        System.err.println("  Blue tower: " + ((state.blueTowers & GameState.bit(square)) != 0));
+        if ((state.redTowers & GameState.bit(square)) != 0) {
+            System.err.println("  Red tower height: " + state.redStackHeights[square]);
+        }
+        if ((state.blueTowers & GameState.bit(square)) != 0) {
+            System.err.println("  Blue tower height: " + state.blueStackHeights[square]);
+        }
+    }
+
+    private static boolean isHorizontalEdgeWrap(int from, int to) {
+        int fromRank = GameState.rank(from);
+        int toRank = GameState.rank(to);
+        int fromFile = GameState.file(from);
+        int toFile = GameState.file(to);
+
+        // If it's a horizontal move (same rank)
+        if (fromRank == toRank) {
+            // Check if the file difference is too large (indicates wrapping)
+            int fileDiff = Math.abs(fromFile - toFile);
+            return fileDiff > 1 && fileDiff < 6; // Suspicious file jumps
+        }
+
+        return false;
+    }
+
+    private static boolean isStraightLineMove(int from, int to) {
+        int fromRank = GameState.rank(from);
+        int toRank = GameState.rank(to);
+        int fromFile = GameState.file(from);
+        int toFile = GameState.file(to);
+
+        // Must be either same rank (horizontal) or same file (vertical)
+        return fromRank == toRank || fromFile == toFile;
+    }
+
     /**
      * Find best tactical fallback move
      */

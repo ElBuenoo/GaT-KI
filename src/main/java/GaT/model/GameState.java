@@ -51,6 +51,15 @@ public class GameState {
         return index % BOARD_SIZE;
     }
 
+    // ADDED: Missing method for HangingPieceDetector
+    public static String squareToString(int index) {
+        if (!isOnBoard(index)) return "INVALID";
+        int rank = rank(index);
+        int file = file(index);
+        char fileChar = (char)('A' + file);
+        return "" + fileChar + (rank + 1);
+    }
+
     //initializes the Random Keys for the Zobrest-Hashing
     private static void initializeZobristKeys(){
         Random rand = new Random(42); // Fixed seed for reproducibility
@@ -374,4 +383,3 @@ public class GameState {
         return Objects.hash(redGuard, redTowers, Arrays.hashCode(redStackHeights), blueGuard, blueTowers, Arrays.hashCode(blueStackHeights), redToMove);
     }
 }
-
