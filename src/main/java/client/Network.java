@@ -20,7 +20,7 @@ public class Network {
 
     public Network() {
         this.server = "game.guard-and-towers.com";
-        this.port = 35000;
+        this.port = 35004;
         this.playerNumber = connect();
     }
 
