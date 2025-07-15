@@ -23,7 +23,7 @@ public class TimedSearchEngine {
     private final SearchEngine searchEngine;
     private final Evaluator evaluator;
     private final TimeManager timeManager;
-    private final SearchStatistics statistics;
+    private final UnifiedStatistics statistics;
 
     // === SEARCH STATE (THREAD-SAFE) ===
     private final AtomicBoolean searchActive = new AtomicBoolean(false);
@@ -39,11 +39,13 @@ public class TimedSearchEngine {
                 evaluator,
                 new MoveOrdering(),
                 new TranspositionTable(SearchConfig.TT_SIZE),
-                SearchStatistics.getInstance()
+                UnifiedStatistics
+.getInstance()
         );
         this.evaluator = evaluator;
         this.timeManager = timeManager;
-        this.statistics = SearchStatistics.getInstance();
+        this.statistics = UnifiedStatistics
+.getInstance();
 
         System.out.println("🚀 TimedSearchEngine initialized with SearchConfig:");
         System.out.println("   TT_SIZE: " + SearchConfig.TT_SIZE);
@@ -506,7 +508,8 @@ public class TimedSearchEngine {
         return searchActive.get();
     }
 
-    public SearchStatistics getCurrentStatistics() {
+    public UnifiedStatistics
+ getCurrentStatistics() {
         return statistics;
     }
 

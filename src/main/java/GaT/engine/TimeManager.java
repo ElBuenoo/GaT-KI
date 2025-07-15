@@ -3,7 +3,7 @@ package GaT.engine;
 import GaT.search.MoveGenerator;
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
+
 import java.util.List;
 
 /**

@@ -4,15 +4,9 @@ import java.util.List;
 
 import GaT.evaluation.Evaluator;
 import GaT.search.MoveGenerator;
-import GaT.search.PVSSearch;
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
 import GaT.engine.TimeManager;
-import GaT.engine.TimedMinimax;
-import GaT.search.Minimax;
-import GaT.search.QuiescenceSearch;
-import GaT.search.SearchStatistics;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
