@@ -86,6 +86,7 @@ public class Evaluator {
                 advancementScore * ADVANCEMENT_WEIGHT +
                 safetyScore * SAFETY_WEIGHT +  activityScore * ACTIVITY_WEIGHT) / 100;
 
+
         // Calculate enhanced features
         int enhancedScore = 0;
         enhancedScore += evaluateHeightMobility(state);
