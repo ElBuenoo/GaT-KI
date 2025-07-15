@@ -1,7 +1,6 @@
 package GaT.evaluation;
 
 import GaT.model.GameState;
-import GaT.model.SearchConfig;
 import GaT.search.MoveGenerator;
 import GaT.model.Move;
 import java.util.List;

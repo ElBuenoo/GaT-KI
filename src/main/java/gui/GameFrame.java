@@ -5,7 +5,6 @@ import GaT.model.Move;
 import GaT.engine.TimedMinimax;
 import GaT.search.Minimax;
 import GaT.search.MoveGenerator;
-import GaT.model.SearchConfig;
 
 import javax.swing.*;
 import java.awt.*;

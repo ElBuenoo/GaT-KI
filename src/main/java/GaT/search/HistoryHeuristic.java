@@ -2,7 +2,6 @@ package GaT.search;
 
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
 
 /**
  * HISTORY HEURISTIC - FULL SEARCHCONFIG INTEGRATION
