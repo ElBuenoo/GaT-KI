@@ -805,6 +805,7 @@ public class Evaluator {
         return sb.toString();
     }
 
+
     /**
      * Quick evaluation for compatibility with existing interfaces
      */
