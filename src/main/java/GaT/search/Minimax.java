@@ -3,29 +3,23 @@ package GaT.search;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.TTEntry;
-import GaT.model.SearchConfig;
-import GaT.evaluation.Evaluator; // Your new unified evaluator
+import GaT.model.GameConfig;
+import GaT.model.GameValues;
+import GaT.evaluation.Evaluator;
 
 import java.util.List;
 import java.util.function.BooleanSupplier;
 
 /**
- * MINIMAX - UNIFIED EVALUATOR INTEGRATION
- *
- * CHANGES:
- * ✅ Single unified evaluator instance used throughout
- * ✅ All evaluation calls route through unified evaluator
- * ✅ Removed legacy ModularEvaluator and EnhancedEvaluator references
- * ✅ Simplified evaluation interface
- * ✅ Maintains all existing functionality with new evaluator
+ * MINIMAX - UNIFIED SYSTEMS INTEGRATION
  */
 public class Minimax {
 
-    // === CORE COMPONENTS WITH UNIFIED EVALUATOR ===
-    private static final Evaluator evaluator = new Evaluator(); // Single unified evaluator instance
+    // === CORE COMPONENTS ===
+    private static final Evaluator evaluator = new Evaluator();
     private static final MoveOrdering moveOrdering = new MoveOrdering();
-    private static final TranspositionTable transpositionTable = new TranspositionTable(SearchConfig.TT_SIZE);
-    private static final SearchStatistics statistics = SearchStatistics.getInstance();
+    private static final TranspositionTable transpositionTable = new TranspositionTable(GameConfig.TT_SIZE);
+    private static final UnifiedStatistics statistics = UnifiedStatistics.getInstance();
 
     // === CASTLE POSITIONS ===
     public static final int RED_CASTLE_INDEX = GameState.getIndex(6, 3); // D7
@@ -40,7 +34,7 @@ public class Minimax {
     // === EVALUATION METHODS ===
 
     /**
-     * Main static evaluation method - uses unified evaluator
+     * Main static evaluation method
      */
     public static int evaluate(GameState state, int depth) {
         return evaluator.evaluate(state);
@@ -72,17 +66,17 @@ public class Minimax {
     // === MAIN SEARCH INTERFACES ===
 
     /**
-     * Find best move using SearchConfig strategy
+     * Find best move using GameConfig strategy
      */
-    public static Move findBestMoveWithStrategy(GameState state, int depth, SearchConfig.SearchStrategy strategy) {
+    public static Move findBestMoveWithStrategy(GameState state, int depth, GameConfig.Strategy strategy) {
         if (state == null) {
             System.err.println("❌ ERROR: Null game state in findBestMoveWithStrategy");
             return null;
         }
 
         if (strategy == null) {
-            strategy = SearchConfig.DEFAULT_STRATEGY;
-            System.out.println("🔧 Using SearchConfig.DEFAULT_STRATEGY: " + strategy);
+            strategy = GameConfig.DEFAULT_STRATEGY;
+            System.out.println("🔧 Using GameConfig.DEFAULT_STRATEGY: " + strategy);
         }
 
         statistics.reset();
@@ -93,9 +87,9 @@ public class Minimax {
             return null;
         }
 
-        // Order moves using SearchConfig-aware move ordering
+        // Order moves
         TTEntry ttEntry = getTranspositionEntry(state.hash());
-        moveOrdering.orderMoves(moves, state, depth, ttEntry);
+        moveOrdering.orderMoves(moves, state, ttEntry);
 
         Move bestMove = null;
         boolean isRed = state.redToMove;
@@ -114,7 +108,11 @@ public class Minimax {
                         score = PVSSearch.search(newState, depth - 1,
                                 Integer.MIN_VALUE, Integer.MAX_VALUE, !isRed, true);
                         break;
-                    case MINIMAX:
+                    case PVS_Q:
+                        score = PVSSearch.searchWithQuiescence(newState, depth - 1,
+                                Integer.MIN_VALUE, Integer.MAX_VALUE, !isRed, true);
+                        break;
+                    case ALPHA_BETA:
                     default:
                         score = minimax(newState, depth - 1,
                                 Integer.MIN_VALUE, Integer.MAX_VALUE, !isRed);
@@ -137,45 +135,45 @@ public class Minimax {
     }
 
     /**
-     * Legacy method - uses unified evaluator
+     * Legacy method
      */
     public static Move findBestMove(GameState state, int depth) {
-        return findBestMoveWithStrategy(state, depth, SearchConfig.DEFAULT_STRATEGY);
+        return findBestMoveWithStrategy(state, depth, GameConfig.DEFAULT_STRATEGY);
     }
 
     /**
      * PVS search method
      */
     public static Move findBestMoveWithPVS(GameState state, int depth) {
-        return findBestMoveWithStrategy(state, depth, SearchConfig.SearchStrategy.PVS);
+        return findBestMoveWithStrategy(state, depth, GameConfig.Strategy.PVS);
     }
 
     /**
      * Quiescence search method
      */
     public static Move findBestMoveWithQuiescence(GameState state, int depth) {
-        return findBestMoveWithStrategy(state, depth, SearchConfig.SearchStrategy.PVS); // PVS includes quiescence
+        return findBestMoveWithStrategy(state, depth, GameConfig.Strategy.PVS_Q);
     }
 
     /**
-     * Ultimate AI method using SearchConfig.DEFAULT_STRATEGY
+     * Ultimate AI method
      */
     public static Move findBestMoveUltimate(GameState state, int depth) {
-        return findBestMoveWithStrategy(state, depth, SearchConfig.DEFAULT_STRATEGY);
+        return findBestMoveWithStrategy(state, depth, GameConfig.DEFAULT_STRATEGY);
     }
 
     // === CORE MINIMAX ALGORITHM ===
 
     private static int minimax(GameState state, int depth, int alpha, int beta, boolean maximizingPlayer) {
         counter++;
-        statistics.incrementNodeCount();
+        statistics.incrementRegularNode();
 
         if (timeoutChecker != null && timeoutChecker.getAsBoolean()) {
             return evaluate(state, depth);
         }
 
         if (depth == 0 || isGameOver(state)) {
-            statistics.incrementLeafNodeCount();
+            statistics.incrementLeafNode();
             return evaluate(state, depth);
         }
 
@@ -186,7 +184,7 @@ public class Minimax {
 
         // Move ordering
         TTEntry ttEntry = getTranspositionEntry(state.hash());
-        moveOrdering.orderMoves(moves, state, depth, ttEntry);
+        moveOrdering.orderMoves(moves, state, ttEntry);
 
         if (maximizingPlayer) {
             int maxEval = Integer.MIN_VALUE;
@@ -200,7 +198,7 @@ public class Minimax {
                     maxEval = Math.max(maxEval, eval);
                     alpha = Math.max(alpha, eval);
                     if (beta <= alpha) {
-                        statistics.incrementAlphaBetaCutoffs();
+                        statistics.incrementAlphaBetaCutoff();
                         break; // Beta cutoff
                     }
                 } catch (Exception e) {
@@ -221,7 +219,7 @@ public class Minimax {
                     minEval = Math.min(minEval, eval);
                     beta = Math.min(beta, eval);
                     if (beta <= alpha) {
-                        statistics.incrementAlphaBetaCutoffs();
+                        statistics.incrementAlphaBetaCutoff();
                         break; // Alpha cutoff
                     }
                 } catch (Exception e) {
@@ -236,7 +234,7 @@ public class Minimax {
     // === ANALYSIS AND DIAGNOSTICS ===
 
     /**
-     * Debug evaluation breakdown using unified evaluator
+     * Debug evaluation breakdown
      */
     public static void printEvaluationBreakdown(GameState state) {
         System.out.println(evaluator.getEvaluationBreakdown(state));
@@ -248,30 +246,30 @@ public class Minimax {
     public static void reset() {
         statistics.reset();
         transpositionTable.clear();
-        moveOrdering.resetKillerMoves();
+        moveOrdering.reset();
         counter = 0;
         clearTimeoutChecker();
 
-        System.out.println("🔄 Minimax reset with unified evaluator");
+        System.out.println("🔄 Minimax reset with unified systems");
     }
 
     /**
      * Performance analysis
      */
     public static void analyzePosition(GameState state, int maxDepth) {
-        System.out.println("=== POSITION ANALYSIS WITH UNIFIED EVALUATOR ===");
+        System.out.println("=== POSITION ANALYSIS ===");
         state.printBoard();
         System.out.println("To move: " + (state.redToMove ? "RED" : "BLUE"));
         System.out.println("Material balance: " + getMaterialBalance(state));
         System.out.println("Game over: " + isGameOver(state));
         System.out.println("Endgame: " + isEndgame(state));
-        System.out.println("Strategy: " + SearchConfig.DEFAULT_STRATEGY);
+        System.out.println("Strategy: " + GameConfig.DEFAULT_STRATEGY);
 
         if (!isGameOver(state)) {
-            for (int depth = 1; depth <= Math.min(maxDepth, SearchConfig.MAX_DEPTH); depth++) {
+            for (int depth = 1; depth <= Math.min(maxDepth, GameConfig.MAX_DEPTH); depth++) {
                 reset();
                 long startTime = System.currentTimeMillis();
-                Move bestMove = findBestMoveWithStrategy(state, depth, SearchConfig.DEFAULT_STRATEGY);
+                Move bestMove = findBestMoveWithStrategy(state, depth, GameConfig.DEFAULT_STRATEGY);
                 long endTime = System.currentTimeMillis();
 
                 if (bestMove != null) {
@@ -280,7 +278,7 @@ public class Minimax {
                     int eval = evaluate(result, 0);
 
                     System.out.printf("Depth %d: %s (eval: %+d, time: %dms, nodes: %d)\n",
-                            depth, bestMove, eval, endTime - startTime, statistics.getNodeCount());
+                            depth, bestMove, eval, endTime - startTime, statistics.getRegularNodes());
                 }
             }
         }
@@ -307,13 +305,13 @@ public class Minimax {
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
             totalMaterial += state.redStackHeights[i] + state.blueStackHeights[i];
         }
-        return totalMaterial <= SearchConfig.ENDGAME_MATERIAL_THRESHOLD;
+        return totalMaterial <= 8; // Endgame threshold
     }
 
     public static int getMaterialBalance(GameState state) {
         int balance = 0;
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
-            balance += (state.redStackHeights[i] - state.blueStackHeights[i]) * 100;
+            balance += (state.redStackHeights[i] - state.blueStackHeights[i]) * GameValues.TOWER_VALUE;
         }
         return balance;
     }
@@ -323,7 +321,7 @@ public class Minimax {
     }
 
     public static boolean hasNonPawnMaterial(GameState state) {
-        // For Turm & Wächter, check if there are any towers
+        // For Guard & Towers, check if there are any towers
         for (int i = 0; i < GameState.NUM_SQUARES; i++) {
             if (state.redStackHeights[i] > 0 || state.blueStackHeights[i] > 0) {
                 return true;
@@ -366,17 +364,13 @@ public class Minimax {
 
     public static String getComponentStatus() {
         StringBuilder sb = new StringBuilder();
-        sb.append("=== MINIMAX COMPONENT STATUS (Unified Evaluator) ===\n");
+        sb.append("=== MINIMAX COMPONENT STATUS ===\n");
         sb.append("Evaluator: ").append(evaluator.getClass().getSimpleName()).append("\n");
         sb.append("Move Ordering: ").append(moveOrdering.getStatistics()).append("\n");
-        sb.append("Transposition Table: ").append(transpositionTable.getBriefStatistics()).append("\n");
+        sb.append("Transposition Table: Size ").append(transpositionTable.size()).append("\n");
         sb.append("Search Statistics: ").append(statistics.getBriefSummary()).append("\n");
-        sb.append("Default Strategy: ").append(SearchConfig.DEFAULT_STRATEGY).append("\n");
-        sb.append("Max Depth: ").append(SearchConfig.MAX_DEPTH).append("\n");
+        sb.append("Default Strategy: ").append(GameConfig.DEFAULT_STRATEGY).append("\n");
+        sb.append("Max Depth: ").append(GameConfig.MAX_DEPTH).append("\n");
         return sb.toString();
-    }
-
-    public static boolean validateSearchConfigIntegration() {
-        return SearchConfig.validateConfiguration();
     }
 }

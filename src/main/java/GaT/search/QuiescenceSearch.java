@@ -2,36 +2,25 @@ package GaT.search;
 
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
+import GaT.model.GameConfig;
+import GaT.model.GameValues;
+
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * QUIESCENCE SEARCH - COMPLETE SEARCHCONFIG INTEGRATION
- *
- * CHANGES:
- * ✅ All constants now use SearchConfig parameters
- * ✅ MAX_Q_DEPTH from SearchConfig.MAX_Q_DEPTH
- * ✅ Delta pruning margins from SearchConfig.Q_DELTA_MARGIN
- * ✅ Futility thresholds from SearchConfig.Q_FUTILITY_THRESHOLD
- * ✅ Tactical recursion from SearchConfig.MAX_TACTICAL_RECURSION
- * ✅ All hardcoded values replaced with SearchConfig
+ * QUIESCENCE SEARCH - UNIFIED SYSTEMS INTEGRATION
  */
 public class QuiescenceSearch {
 
-    // === RECURSION PROTECTION USING SEARCHCONFIG ===
+    // === RECURSION PROTECTION ===
     private static int recursionDepth = 0;
-
-    // === STATISTICS ===
-    public static long qNodes = 0;
-    public static long qCutoffs = 0;
-    public static long standPatCutoffs = 0;
 
     // === MOVE ORDERING ACCESS ===
     private static MoveOrdering moveOrdering = new MoveOrdering();
 
     /**
-     * Main quiescence search using SearchConfig parameters
+     * Main quiescence search
      */
     public static int quiesce(GameState state, int alpha, int beta, boolean maximizingPlayer, int qDepth) {
         // CRITICAL NULL CHECK AT ENTRY
@@ -46,10 +35,9 @@ public class QuiescenceSearch {
             return Minimax.evaluate(state, -qDepth);
         }
 
-        qNodes++;
+        UnifiedStatistics.getInstance().incrementQuiescenceNode();
 
-        // Use SearchConfig.MAX_Q_DEPTH instead of hardcoded constant
-        if (qDepth >= SearchConfig.MAX_Q_DEPTH) {
+        if (qDepth >= GameConfig.MAX_Q_DEPTH) {
             return Minimax.evaluate(state, -qDepth);
         }
 
@@ -64,15 +52,14 @@ public class QuiescenceSearch {
 
         if (maximizingPlayer) {
             if (standPat >= beta) {
-                standPatCutoffs++;
                 return beta;
             }
             alpha = Math.max(alpha, standPat);
 
-            // Enhanced tactical move generation using SearchConfig
+            // Generate tactical moves
             List<Move> tacticalMoves;
             try {
-                tacticalMoves = generateTacticalMovesWithConfig(state, qDepth);
+                tacticalMoves = generateTacticalMoves(state, qDepth);
             } catch (Exception e) {
                 System.err.println("❌ ERROR: Tactical move generation failed: " + e.getMessage());
                 return standPat;
@@ -84,16 +71,13 @@ public class QuiescenceSearch {
 
             int maxEval = standPat;
             for (Move move : tacticalMoves) {
-                if (move == null) {
-                    System.err.println("❌ ERROR: Null move in tactical moves list");
-                    continue;
-                }
+                if (move == null) continue;
 
-                // Enhanced delta pruning using SearchConfig.Q_DELTA_MARGIN
+                // Delta pruning
                 try {
                     if (isCapture(move, state)) {
                         int captureValue = estimateCaptureValue(move, state);
-                        if (standPat + captureValue + SearchConfig.Q_DELTA_MARGIN < alpha) {
+                        if (standPat + captureValue + GameConfig.Q_DELTA_MARGIN < alpha) {
                             continue; // Skip bad captures
                         }
                     }
@@ -125,16 +109,7 @@ public class QuiescenceSearch {
                 alpha = Math.max(alpha, eval);
 
                 if (beta <= alpha) {
-                    qCutoffs++;
-
-                    // History update using SearchConfig thresholds
-                    if (qDepth <= SearchConfig.Q_HISTORY_UPDATE_DEPTH && !isCapture(move, state)) {
-                        try {
-                            moveOrdering.updateHistory(move, Math.max(1, SearchConfig.MAX_Q_DEPTH - qDepth), state);
-                        } catch (Exception e) {
-                            // Silent fail - history is optimization
-                        }
-                    }
+                    UnifiedStatistics.getInstance().incrementAlphaBetaCutoff();
                     break;
                 }
             }
@@ -142,14 +117,13 @@ public class QuiescenceSearch {
 
         } else {
             if (standPat <= alpha) {
-                standPatCutoffs++;
                 return alpha;
             }
             beta = Math.min(beta, standPat);
 
             List<Move> tacticalMoves;
             try {
-                tacticalMoves = generateTacticalMovesWithConfig(state, qDepth);
+                tacticalMoves = generateTacticalMoves(state, qDepth);
             } catch (Exception e) {
                 System.err.println("❌ ERROR: Tactical move generation failed: " + e.getMessage());
                 return standPat;
@@ -161,16 +135,13 @@ public class QuiescenceSearch {
 
             int minEval = standPat;
             for (Move move : tacticalMoves) {
-                if (move == null) {
-                    System.err.println("❌ ERROR: Null move in tactical moves list");
-                    continue;
-                }
+                if (move == null) continue;
 
-                // Delta pruning using SearchConfig.Q_DELTA_MARGIN
+                // Delta pruning
                 try {
                     if (isCapture(move, state)) {
                         int captureValue = estimateCaptureValue(move, state);
-                        if (standPat - captureValue - SearchConfig.Q_DELTA_MARGIN > beta) {
+                        if (standPat - captureValue - GameConfig.Q_DELTA_MARGIN > beta) {
                             continue;
                         }
                     }
@@ -202,16 +173,7 @@ public class QuiescenceSearch {
                 beta = Math.min(beta, eval);
 
                 if (beta <= alpha) {
-                    qCutoffs++;
-
-                    // History update using SearchConfig
-                    if (qDepth <= SearchConfig.Q_HISTORY_UPDATE_DEPTH && !isCapture(move, state)) {
-                        try {
-                            moveOrdering.updateHistory(move, Math.max(1, SearchConfig.MAX_Q_DEPTH - qDepth), state);
-                        } catch (Exception e) {
-                            // Silent fail - history is optimization
-                        }
-                    }
+                    UnifiedStatistics.getInstance().incrementAlphaBetaCutoff();
                     break;
                 }
             }
@@ -220,16 +182,15 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Enhanced tactical move generation using SearchConfig parameters
+     * Generate tactical moves
      */
-    private static List<Move> generateTacticalMovesWithConfig(GameState state, int qDepth) {
+    private static List<Move> generateTacticalMoves(GameState state, int qDepth) {
         if (state == null || !state.isValid()) {
-            System.err.println("❌ ERROR: Invalid state in generateTacticalMovesWithConfig");
+            System.err.println("❌ ERROR: Invalid state in generateTacticalMoves");
             return new ArrayList<>();
         }
 
-        // Use SearchConfig.MAX_TACTICAL_RECURSION instead of hardcoded constant
-        if (recursionDepth >= SearchConfig.MAX_TACTICAL_RECURSION) {
+        if (recursionDepth >= 2) { // Simple recursion limit
             return new ArrayList<>();
         }
 
@@ -242,21 +203,21 @@ public class QuiescenceSearch {
                     return new ArrayList<>();
                 }
             } catch (Exception e) {
-                System.err.println("❌ ERROR: Move generation failed in generateTacticalMovesWithConfig: " + e.getMessage());
+                System.err.println("❌ ERROR: Move generation failed in generateTacticalMoves: " + e.getMessage());
                 return new ArrayList<>();
             }
 
             List<Move> tacticalMoves = new ArrayList<>();
 
             for (Move move : allMoves) {
-                if (move != null && isTacticalMoveWithConfig(move, state)) {
+                if (move != null && isTacticalMove(move, state)) {
                     tacticalMoves.add(move);
                 }
             }
 
             // Order tactical moves
             try {
-                orderTacticalMovesWithConfig(tacticalMoves, state, qDepth);
+                orderTacticalMoves(tacticalMoves, state, qDepth);
             } catch (Exception e) {
                 System.err.println("❌ ERROR: Tactical move ordering failed: " + e.getMessage());
             }
@@ -264,7 +225,7 @@ public class QuiescenceSearch {
             return tacticalMoves;
 
         } catch (Exception e) {
-            System.err.println("❌ ERROR: generateTacticalMovesWithConfig failed: " + e.getMessage());
+            System.err.println("❌ ERROR: generateTacticalMoves failed: " + e.getMessage());
             return new ArrayList<>();
         } finally {
             recursionDepth--;
@@ -272,16 +233,16 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Order tactical moves using SearchConfig priorities
+     * Order tactical moves
      */
-    private static void orderTacticalMovesWithConfig(List<Move> moves, GameState state, int qDepth) {
+    private static void orderTacticalMoves(List<Move> moves, GameState state, int qDepth) {
         if (moves.size() <= 1) return;
 
         try {
             moves.sort((a, b) -> {
                 try {
-                    int scoreA = scoreTacticalMoveWithConfig(a, state, qDepth);
-                    int scoreB = scoreTacticalMoveWithConfig(b, state, qDepth);
+                    int scoreA = scoreTacticalMove(a, state, qDepth);
+                    int scoreB = scoreTacticalMove(b, state, qDepth);
                     return Integer.compare(scoreB, scoreA);
                 } catch (Exception e) {
                     System.err.println("❌ ERROR: Move comparison failed: " + e.getMessage());
@@ -294,37 +255,32 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Score tactical moves using SearchConfig values
+     * Score tactical moves
      */
-    private static int scoreTacticalMoveWithConfig(Move move, GameState state, int qDepth) {
+    private static int scoreTacticalMove(Move move, GameState state, int qDepth) {
         if (move == null || state == null) return 0;
 
         int score = 0;
 
         try {
-            // Capture value (highest priority) using SearchConfig
+            // Capture value (highest priority)
             if (isCapture(move, state)) {
-                score += estimateCaptureValue(move, state) * SearchConfig.Q_CAPTURE_SCORE_MULTIPLIER;
+                score += estimateCaptureValue(move, state) * 10;
 
                 // MVV-LVA: subtract attacker value
                 score -= getAttackerValue(move, state);
             }
 
-            // Winning moves using SearchConfig
+            // Winning moves
             if (isWinningGuardMove(move, state)) {
-                score += SearchConfig.Q_WINNING_MOVE_BONUS;
+                score += 50000;
             }
 
-            // Check giving moves using SearchConfig
-            if (givesCheckSimple(move, state)) {
-                score += SearchConfig.Q_CHECK_BONUS;
-            }
-
-            // Activity bonus using SearchConfig
-            score += move.amountMoved * SearchConfig.Q_ACTIVITY_BONUS;
+            // Activity bonus
+            score += move.amountMoved * 5;
 
             // Depth penalty (prefer earlier discoveries)
-            score -= qDepth * SearchConfig.Q_DEPTH_PENALTY;
+            score -= qDepth * 10;
 
         } catch (Exception e) {
             System.err.println("❌ ERROR: Tactical move scoring failed for move " + move + ": " + e.getMessage());
@@ -334,9 +290,9 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Enhanced tactical move detection using SearchConfig thresholds
+     * Enhanced tactical move detection
      */
-    private static boolean isTacticalMoveWithConfig(Move move, GameState state) {
+    private static boolean isTacticalMove(Move move, GameState state) {
         if (move == null || state == null) return false;
 
         try {
@@ -350,17 +306,12 @@ public class QuiescenceSearch {
                 return true;
             }
 
-            // 3. Simple check detection
-            if (givesCheckSimple(move, state)) {
+            // 3. High activity moves
+            if (move.amountMoved >= 3) {
                 return true;
             }
 
-            // 4. High activity moves using SearchConfig threshold
-            if (move.amountMoved >= SearchConfig.Q_HIGH_ACTIVITY_THRESHOLD) {
-                return true;
-            }
-
-            // 5. Advancing guard moves in endgame using SearchConfig
+            // 4. Advancing guard moves in endgame
             if (isGuardAdvancingInEndgame(move, state)) {
                 return true;
             }
@@ -374,7 +325,7 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Check if guard is advancing in endgame using SearchConfig
+     * Check if guard is advancing in endgame
      */
     private static boolean isGuardAdvancingInEndgame(Move move, GameState state) {
         try {
@@ -399,7 +350,7 @@ public class QuiescenceSearch {
         }
     }
 
-    // === SAFE HELPER METHODS WITH SEARCHCONFIG ===
+    // === HELPER METHODS ===
 
     private static boolean isCapture(Move move, GameState state) {
         try {
@@ -432,28 +383,6 @@ public class QuiescenceSearch {
         }
     }
 
-    private static boolean givesCheckSimple(Move move, GameState state) {
-        try {
-            if (move == null || state == null) return false;
-
-            boolean isRed = state.redToMove;
-            long enemyGuard = isRed ? state.blueGuard : state.redGuard;
-
-            if (enemyGuard == 0) return false;
-
-            int enemyGuardPos = Long.numberOfTrailingZeros(enemyGuard);
-            int rankDiff = Math.abs(GameState.rank(move.to) - GameState.rank(enemyGuardPos));
-            int fileDiff = Math.abs(GameState.file(move.to) - GameState.file(enemyGuardPos));
-
-            // Simple adjacency or line attack check using SearchConfig
-            return (rankDiff + fileDiff == 1) ||
-                    (rankDiff == 0 && fileDiff <= move.amountMoved) ||
-                    (fileDiff == 0 && rankDiff <= move.amountMoved);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     private static int estimateCaptureValue(Move move, GameState state) {
         try {
             if (move == null || state == null) return 0;
@@ -461,15 +390,15 @@ public class QuiescenceSearch {
             long toBit = GameState.bit(move.to);
             boolean isRed = state.redToMove;
 
-            // Guard capture using SearchConfig value
+            // Guard capture
             if (((isRed ? state.blueGuard : state.redGuard) & toBit) != 0) {
-                return SearchConfig.Q_GUARD_CAPTURE_VALUE;
+                return GameValues.GUARD_VALUE;
             }
 
-            // Tower capture using SearchConfig multiplier
+            // Tower capture
             if (((isRed ? state.blueTowers : state.redTowers) & toBit) != 0) {
                 int height = isRed ? state.blueStackHeights[move.to] : state.redStackHeights[move.to];
-                return height * SearchConfig.Q_TOWER_CAPTURE_VALUE_PER_HEIGHT;
+                return height * GameValues.TOWER_VALUE;
             }
 
             return 0;
@@ -479,7 +408,7 @@ public class QuiescenceSearch {
     }
 
     /**
-     * Get attacker value for MVV-LVA using SearchConfig
+     * Get attacker value for MVV-LVA
      */
     private static int getAttackerValue(Move move, GameState state) {
         try {
@@ -487,21 +416,21 @@ public class QuiescenceSearch {
 
             boolean isRed = state.redToMove;
 
-            // Check if it's a guard move - use SearchConfig value
+            // Check if it's a guard move
             long guardBit = isRed ? state.redGuard : state.blueGuard;
             if (guardBit != 0 && move.from == Long.numberOfTrailingZeros(guardBit)) {
-                return SearchConfig.Q_GUARD_ATTACKER_VALUE;
+                return 50;
             }
 
-            // Tower value based on height using SearchConfig multiplier
+            // Tower value based on height
             int height = isRed ? state.redStackHeights[move.from] : state.blueStackHeights[move.from];
-            return height * SearchConfig.Q_TOWER_ATTACKER_VALUE_PER_HEIGHT;
+            return height * 100;
         } catch (Exception e) {
             return 0;
         }
     }
 
-    // === INITIALIZATION AND STATISTICS WITH SEARCHCONFIG ===
+    // === INITIALIZATION AND STATISTICS ===
 
     /**
      * Set move ordering instance for history access
@@ -513,74 +442,23 @@ public class QuiescenceSearch {
     }
 
     public static void resetQuiescenceStats() {
-        qNodes = 0;
-        qCutoffs = 0;
-        standPatCutoffs = 0;
-
-        System.out.println("🔧 QuiescenceSearch reset with SearchConfig:");
-        System.out.println("   MAX_Q_DEPTH: " + SearchConfig.MAX_Q_DEPTH);
-        System.out.println("   Q_DELTA_MARGIN: " + SearchConfig.Q_DELTA_MARGIN);
-        System.out.println("   Q_FUTILITY_THRESHOLD: " + SearchConfig.Q_FUTILITY_THRESHOLD);
+        System.out.println("🔧 QuiescenceSearch reset with GameConfig");
     }
 
     public static void setRemainingTime(long timeMs) {
-        // Adjust quiescence depth based on time using SearchConfig
-        if (timeMs < SearchConfig.EMERGENCY_TIME_MS) {
-            // In emergency mode, reduce quiescence depth
+        // Adjust quiescence depth based on time
+        if (timeMs < GameConfig.EMERGENCY_TIME_MS) {
             System.out.println("🚨 Emergency mode: Reduced quiescence depth");
         }
     }
 
     /**
-     * Get quiescence statistics with SearchConfig info
+     * Get quiescence statistics
      */
     public static String getQuiescenceStatistics() {
-        double standPatRate = qNodes > 0 ? (double) standPatCutoffs / qNodes * 100 : 0;
-        double cutoffRate = qNodes > 0 ? (double) qCutoffs / qNodes * 100 : 0;
-
-        return String.format("Q-Search[Config]: %d nodes, %d cutoffs (%.1f%%), %d standpat (%.1f%%), max_depth=%d",
-                qNodes, qCutoffs, cutoffRate, standPatCutoffs, standPatRate, SearchConfig.MAX_Q_DEPTH);
-    }
-
-    /**
-     * Validate SearchConfig integration
-     */
-    public static boolean validateConfiguration() {
-        boolean valid = true;
-
-        if (SearchConfig.MAX_Q_DEPTH <= 0 || SearchConfig.MAX_Q_DEPTH > 20) {
-            System.err.println("❌ Invalid MAX_Q_DEPTH: " + SearchConfig.MAX_Q_DEPTH);
-            valid = false;
-        }
-
-        if (SearchConfig.Q_DELTA_MARGIN < 0) {
-            System.err.println("❌ Invalid Q_DELTA_MARGIN: " + SearchConfig.Q_DELTA_MARGIN);
-            valid = false;
-        }
-
-        if (SearchConfig.Q_FUTILITY_THRESHOLD < 0) {
-            System.err.println("❌ Invalid Q_FUTILITY_THRESHOLD: " + SearchConfig.Q_FUTILITY_THRESHOLD);
-            valid = false;
-        }
-
-        if (SearchConfig.MAX_TACTICAL_RECURSION < 0 || SearchConfig.MAX_TACTICAL_RECURSION > 5) {
-            System.err.println("❌ Invalid MAX_TACTICAL_RECURSION: " + SearchConfig.MAX_TACTICAL_RECURSION);
-            valid = false;
-        }
-
-        if (valid) {
-            System.out.println("✅ QuiescenceSearch SearchConfig integration validated");
-        }
-
-        return valid;
-    }
-
-    /**
-     * Get configuration summary for debugging
-     */
-    public static String getConfigurationSummary() {
-        return String.format("QuiescenceSearch Config: MaxDepth=%d, DeltaMargin=%d, FutilityThreshold=%d, TacticalRecursion=%d",
-                SearchConfig.MAX_Q_DEPTH, SearchConfig.Q_DELTA_MARGIN,
-                SearchConfig.Q_FUTILITY_THRESHOLD, SearchConfig.MAX_TACTICAL_RECURSION);
+        UnifiedStatistics stats = UnifiedStatistics.getInstance();
+        return String.format("Q-Search: %d nodes, %.1f%% of total",
+                stats.getQuiescenceNodes(),
+                stats.getQuiescenceNodes() * 100.0 / Math.max(1, stats.getTotalNodes()));
     }
 }
