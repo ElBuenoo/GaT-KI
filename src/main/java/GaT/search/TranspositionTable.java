@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import GaT.model.GameConfig;
 
 /**
  * TRANSPOSITION TABLE - COMPLETE SEARCHCONFIG INTEGRATION
@@ -30,30 +31,30 @@ public class TranspositionTable {
     // === CONSTRUCTOR WITH SEARCHCONFIG ===
     public TranspositionTable(int maxSize) {
         // Validate against SearchConfig
-        if (maxSize != SearchConfig.TT_SIZE) {
-            System.out.println("⚠️ TranspositionTable size (" + maxSize + ") differs from SearchConfig.TT_SIZE (" + SearchConfig.TT_SIZE + ")");
+        if (maxSize != GameConfig.TT_SIZE) {
+            System.out.println("⚠️ TranspositionTable size (" + maxSize + ") differs from GameConfig.TT_SIZE (" + GameConfig.TT_SIZE + ")");
         }
 
         this.maxSize = maxSize;
         this.table = new HashMap<>(maxSize * 4 / 3); // Avoid rehashing
 
-        System.out.println("🔧 TranspositionTable initialized with SearchConfig:");
-        System.out.println("   TT_SIZE: " + SearchConfig.TT_SIZE);
-        System.out.println("   TT_EVICTION_THRESHOLD: " + SearchConfig.TT_EVICTION_THRESHOLD);
+        System.out.println("🔧 TranspositionTable initialized with GameConfig:");
+        System.out.println("   TT_SIZE: " + GameConfig.TT_SIZE);
+        System.out.println("   TT_EVICTION_THRESHOLD: " + GameConfig.TT_EVICTION_THRESHOLD);
         System.out.println("   Actual maxSize: " + maxSize);
 
-        validateSearchConfigIntegration();
+        validateGameConfigIntegration();
     }
 
     /**
-     * Default constructor using SearchConfig.TT_SIZE
+     * Default constructor using GameConfig.TT_SIZE
      */
     public TranspositionTable() {
-        this(SearchConfig.TT_SIZE);
+        this(GameConfig.TT_SIZE);
     }
 
     /**
-     * Get entry with SearchConfig-enhanced statistics
+     * Get entry with GameConfig-enhanced statistics
      */
     public TTEntry get(long hash) {
         TTEntry entry = table.get(hash);
@@ -62,7 +63,7 @@ public class TranspositionTable {
             entry.lastAccessed = ++accessCounter;
             hitCount++;
 
-            // Optional: Age-based entry validation using SearchConfig
+            // Optional: Age-based entry validation using GameConfig
             if (shouldValidateEntry(entry)) {
                 if (isEntryTooOld(entry)) {
                     table.remove(hash);
@@ -79,7 +80,7 @@ public class TranspositionTable {
     }
 
     /**
-     * Store entry with SearchConfig-based eviction
+     * Store entry with GameConfig-based eviction
      */
     public void put(long hash, TTEntry entry) {
         if (entry == null) return;
@@ -93,8 +94,8 @@ public class TranspositionTable {
             }
         }
 
-        // Check if we need to evict entries using SearchConfig threshold
-        if (table.size() >= SearchConfig.TT_EVICTION_THRESHOLD) {
+        // Check if we need to evict entries using GameConfig threshold
+        if (table.size() >= GameConfig.TT_EVICTION_THRESHOLD) {
             evictOldEntriesWithConfig();
         }
 
@@ -103,11 +104,11 @@ public class TranspositionTable {
     }
 
     /**
-     * Enhanced eviction using SearchConfig parameters
+     * Enhanced eviction using GameConfig parameters
      */
     private void evictOldEntriesWithConfig() {
-        // Calculate eviction percentage based on SearchConfig
-        int targetSize = (int)(SearchConfig.TT_EVICTION_THRESHOLD * 0.8); // Keep 80% after eviction
+        // Calculate eviction percentage based on GameConfig
+        int targetSize = (int)(GameConfig.TT_EVICTION_THRESHOLD * 0.8); // Keep 80% after eviction
         int toRemove = table.size() - targetSize;
 
         if (toRemove <= 0) return;
@@ -134,7 +135,7 @@ public class TranspositionTable {
         evictionCount += toEvict.size();
 
         System.out.printf("🔧 TT Eviction: Removed %d entries, size now: %d (threshold: %d)\n",
-                toEvict.size(), table.size(), SearchConfig.TT_EVICTION_THRESHOLD);
+                toEvict.size(), table.size(), GameConfig.TT_EVICTION_THRESHOLD);
     }
 
     /**
@@ -162,7 +163,7 @@ public class TranspositionTable {
     }
 
     /**
-     * Check if entry validation is needed (based on SearchConfig)
+     * Check if entry validation is needed (based on GameConfig)
      */
     private boolean shouldValidateEntry(TTEntry entry) {
         // Only validate occasionally to avoid performance impact
@@ -170,17 +171,17 @@ public class TranspositionTable {
     }
 
     /**
-     * Check if entry is too old (using SearchConfig-based criteria)
+     * Check if entry is too old (using GameConfig-based criteria)
      */
     private boolean isEntryTooOld(TTEntry entry) {
         // Consider entry too old if it hasn't been accessed in a long time
         // and we have many accesses since then
         long ageDifference = accessCounter - entry.lastAccessed;
-        return ageDifference > SearchConfig.TT_SIZE / 10; // Entry older than 10% of table size worth of accesses
+        return ageDifference > GameConfig.TT_SIZE / 10; // Entry older than 10% of table size worth of accesses
     }
 
     /**
-     * Clear table with SearchConfig logging
+     * Clear table with GameConfig logging
      */
     public void clear() {
         int oldSize = table.size();
@@ -191,8 +192,8 @@ public class TranspositionTable {
         collisionCount = 0;
         evictionCount = 0;
 
-        System.out.printf("🔧 TranspositionTable cleared: %d entries removed (SearchConfig.TT_SIZE: %d)\n",
-                oldSize, SearchConfig.TT_SIZE);
+        System.out.printf("🔧 TranspositionTable cleared: %d entries removed (GameConfig.TT_SIZE: %d)\n",
+                oldSize, GameConfig.TT_SIZE);
     }
 
     /**
@@ -203,18 +204,12 @@ public class TranspositionTable {
     }
 
     /**
-     * Get maximum table size from SearchConfig
+     * Get maximum table size from GameConfig
      */
     public int getMaxSize() {
         return maxSize;
     }
 
-    /**
-     * Get SearchConfig eviction threshold
-     */
-    public int getEvictionThreshold() {
-        return SearchConfig.TT_EVICTION_THRESHOLD;
-    }
 
     /**
      * Enhanced hit rate calculation
@@ -243,19 +238,18 @@ public class TranspositionTable {
      * Check if table is near eviction threshold
      */
     public boolean isNearEvictionThreshold() {
-        return table.size() > SearchConfig.TT_EVICTION_THRESHOLD * 0.9;
+        return table.size() > GameConfig.TT_EVICTION_THRESHOLD * 0.9;
     }
 
     /**
-     * Get comprehensive statistics with SearchConfig info
+     * Get comprehensive statistics with GameConfig info
      */
     public String getStatistics() {
         StringBuilder sb = new StringBuilder();
-        sb.append("=== TRANSPOSITION TABLE STATISTICS (SearchConfig) ===\n");
+        sb.append("=== TRANSPOSITION TABLE STATISTICS (GameConfig) ===\n");
         sb.append(String.format("Size: %,d / %,d (%.1f%% utilized)\n",
                 table.size(), maxSize, getUtilization()));
-        sb.append(String.format("SearchConfig TT_SIZE: %,d\n", SearchConfig.TT_SIZE));
-        sb.append(String.format("SearchConfig TT_EVICTION_THRESHOLD: %,d\n", SearchConfig.TT_EVICTION_THRESHOLD));
+        sb.append(String.format("GameConfig TT_SIZE: %,d\n", GameConfig.TT_SIZE));
         sb.append(String.format("Accesses: %,d total (%,d hits, %,d misses)\n",
                 hitCount + missCount, hitCount, missCount));
         sb.append(String.format("Hit Rate: %.1f%%\n", getHitRate() * 100));
@@ -264,7 +258,7 @@ public class TranspositionTable {
         sb.append(String.format("Access Counter: %,d\n", accessCounter));
 
         if (isNearEvictionThreshold()) {
-            sb.append("⚠️ Near eviction threshold - consider increasing SearchConfig.TT_SIZE\n");
+            sb.append("⚠️ Near eviction threshold - consider increasing GameConfig.TT_SIZE\n");
         }
 
         return sb.toString();
@@ -278,57 +272,19 @@ public class TranspositionTable {
                 table.size(), maxSize, getUtilization(), getHitRate() * 100, evictionCount);
     }
 
-    /**
-     * Validate SearchConfig integration
-     */
-    private void validateSearchConfigIntegration() {
-        boolean valid = true;
 
-        if (SearchConfig.TT_SIZE <= 0) {
-            System.err.println("❌ Invalid SearchConfig.TT_SIZE: " + SearchConfig.TT_SIZE);
-            valid = false;
-        }
 
-        if (SearchConfig.TT_EVICTION_THRESHOLD <= 0) {
-            System.err.println("❌ Invalid SearchConfig.TT_EVICTION_THRESHOLD: " + SearchConfig.TT_EVICTION_THRESHOLD);
-            valid = false;
-        }
 
-        if (SearchConfig.TT_EVICTION_THRESHOLD > SearchConfig.TT_SIZE) {
-            System.err.println("❌ TT_EVICTION_THRESHOLD should not exceed TT_SIZE");
-            valid = false;
-        }
-
-        if (maxSize != SearchConfig.TT_SIZE) {
-            System.out.println("⚠️ Table maxSize differs from SearchConfig.TT_SIZE - using maxSize: " + maxSize);
-        }
-
-        if (valid) {
-            System.out.println("✅ TranspositionTable SearchConfig integration validated");
-        }
-    }
 
     /**
-     * Get memory usage estimation
-     */
-    public String getMemoryUsage() {
-        // Rough estimation: each entry takes ~50 bytes (hash key + TTEntry object)
-        long estimatedBytes = (long) table.size() * 50;
-        long maxBytes = (long) maxSize * 50;
-
-        return String.format("Memory: ~%.1f MB / %.1f MB (max from SearchConfig)",
-                estimatedBytes / 1024.0 / 1024.0, maxBytes / 1024.0 / 1024.0);
-    }
-
-    /**
-     * Perform maintenance based on SearchConfig settings
+     * Perform maintenance based on GameConfig settings
      */
     public void performMaintenance() {
         System.out.println("🔧 Performing TranspositionTable maintenance...");
 
         // Remove entries that are clearly outdated
         int removedCount = 0;
-        long threshold = accessCounter - (SearchConfig.TT_SIZE / 5); // Remove very old entries
+        long threshold = accessCounter - (GameConfig.TT_SIZE / 5); // Remove very old entries
 
         table.entrySet().removeIf(entry -> {
             if (entry.getValue().lastAccessed < threshold) {
@@ -372,22 +328,19 @@ public class TranspositionTable {
     }
 
     /**
-     * Resize table if needed (based on SearchConfig)
+     * Resize table if needed (based on GameConfig)
      */
-    public boolean needsResize() {
-        // Suggest resize if frequently hitting eviction threshold
-        return evictionCount > 100 && table.size() >= SearchConfig.TT_EVICTION_THRESHOLD;
-    }
+
 
     /**
-     * Get performance recommendations based on SearchConfig
+     * Get performance recommendations based on GameConfig
      */
     public String getPerformanceRecommendations() {
         StringBuilder sb = new StringBuilder();
         sb.append("=== PERFORMANCE RECOMMENDATIONS ===\n");
 
         if (getHitRate() < 0.3) {
-            sb.append("• Low hit rate - consider increasing SearchConfig.TT_SIZE\n");
+            sb.append("• Low hit rate - consider increasing GameConfig.TT_SIZE\n");
         }
 
         if (getCollisionRate() > 0.1) {
@@ -395,15 +348,15 @@ public class TranspositionTable {
         }
 
         if (getUtilization() > 90) {
-            sb.append("• High utilization - increase SearchConfig.TT_SIZE or TT_EVICTION_THRESHOLD\n");
+            sb.append("• High utilization - increase GameConfig.TT_SIZE or TT_EVICTION_THRESHOLD\n");
         }
 
         if (evictionCount > table.size()) {
-            sb.append("• Frequent evictions - consider larger SearchConfig.TT_SIZE\n");
+            sb.append("• Frequent evictions - consider larger GameConfig.TT_SIZE\n");
         }
 
         if (sb.length() == 45) { // Only header
-            sb.append("• Performance looks good with current SearchConfig settings\n");
+            sb.append("• Performance looks good with current GameConfig settings\n");
         }
 
         return sb.toString();
