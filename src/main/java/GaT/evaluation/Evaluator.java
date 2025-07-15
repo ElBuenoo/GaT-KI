@@ -84,8 +84,7 @@ public class Evaluator {
         // Weighted combination of core components
         int coreScore = (materialScore * MATERIAL_WEIGHT +
                 advancementScore * ADVANCEMENT_WEIGHT +
-                safetyScore * SAFETY_WEIGHT +
-                activityScore * ACTIVITY_WEIGHT) / 100;
+                safetyScore * SAFETY_WEIGHT +  activityScore * ACTIVITY_WEIGHT) / 100;
 
         // Calculate enhanced features
         int enhancedScore = 0;
@@ -95,6 +94,7 @@ public class Evaluator {
         enhancedScore += evaluateCastleApproachControl(state);
         enhancedScore += evaluateGuardEscort(state);
         enhancedScore += evaluateStackEfficiency(state);
+
 
         // Final weighted combination
         return (coreScore * CORE_WEIGHT + enhancedScore * ENHANCED_WEIGHT) / 100;
