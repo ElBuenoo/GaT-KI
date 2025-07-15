@@ -6,7 +6,6 @@ import GaT.evaluation.Evaluator;
 import GaT.search.MoveGenerator;
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.engine.TimeManager;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 

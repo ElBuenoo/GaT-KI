@@ -1,163 +1,201 @@
 package GaT.model;
 
 /**
- * GAME VALUES - Turm & Wächter spezifische Piece Values
+ * GAME VALUES - Single source of truth for all piece values
  *
- * Ersetzt teure Evaluation-Aufrufe in Move Ordering mit schnellen Lookups
- * Direkt angepasst an Ihre Spielregeln
+ * ELIMINATES:
+ * - Evaluation dependency in move ordering
+ * - Scattered piece value constants
+ * - Runtime evaluation calls for move scoring
+ *
+ * PROVIDES:
+ * - Compile-time constants for maximum performance
+ * - Centralized value management
+ * - Zero-overhead move scoring
  */
 public final class GameValues {
 
-    // === TURM & WÄCHTER PIECE VALUES ===
-    public static final int GUARD_VALUE = 10000;           // Wächter ist wertvollste Figur
-    public static final int TOWER_BASE_VALUE = 100;        // Turm Grundwert
-    public static final int TOWER_HEIGHT_MULTIPLIER = 50;  // Zusatzwert pro Höhe
+    // === CORE PIECE VALUES ===
+    public static final int TOWER_BASE_VALUE = 100;
+    public static final int TOWER_HEIGHT_MULTIPLIER = 100;  // Each height level worth 100
+    public static final int GUARD_VALUE = 1000;
 
-    // === CAPTURE VALUES (MVV-LVA für Ihre Engine) ===
-    public static final int GUARD_CAPTURE = 10000;         // Wächter schlagen = Gewinn
-    public static final int TOWER_CAPTURE_BASE = 100;      // Turm schlagen
-    public static final int HEIGHT_CAPTURE_BONUS = 100;    // Bonus pro Turmhöhe
+    // === CAPTURE VALUES (MVV-LVA) ===
+    public static final int GUARD_CAPTURE_VALUE = 10000;    // Winning move
+    public static final int TOWER_CAPTURE_BASE = 200;       // Base value for capturing tower
+
+    // === POSITIONAL BONUSES ===
+    public static final int CENTER_FILE_BONUS = 50;         // Files C, D, E
+    public static final int D_FILE_BONUS = 100;             // Special bonus for D-file
+    public static final int ADVANCEMENT_BONUS = 25;         // Per rank toward enemy
+    public static final int CASTLE_PROXIMITY_BONUS = 200;   // Near enemy castle
+
+    // === TACTICAL VALUES ===
+    public static final int CHECK_BONUS = 300;              // Threatening enemy guard
+    public static final int ESCAPE_PENALTY = 150;           // Losing escape routes
+    public static final int MOBILITY_BONUS = 10;            // Per available move
 
     // === MOVE ORDERING PRIORITIES ===
-    public static final int TT_MOVE_PRIORITY = 1000000;    // Hash-Move höchste Priorität
-    public static final int CAPTURE_BASE_PRIORITY = 100000; // Schlagzüge
-    public static final int KILLER_1_PRIORITY = 10000;     // Killer-Move 1
-    public static final int KILLER_2_PRIORITY = 9000;      // Killer-Move 2
-    public static final int HISTORY_MAX_PRIORITY = 1000;   // History Heuristic max
+    public static final int TT_MOVE_PRIORITY = 1000000;     // Highest priority
+    public static final int GUARD_CAPTURE_PRIORITY = 100000;
+    public static final int TOWER_CAPTURE_PRIORITY = 50000;
+    public static final int KILLER_MOVE_PRIORITY = 10000;
+    public static final int HISTORY_MOVE_BASE = 1000;
 
-    // === TURM & WÄCHTER POSITIONAL WERTE ===
+    // === QUICK VALUE LOOKUPS ===
 
     /**
-     * Turm-Wert basierend auf Höhe (schnell!)
+     * Get tower value based on height (zero-overhead)
      */
     public static int getTowerValue(int height) {
         return TOWER_BASE_VALUE + (height * TOWER_HEIGHT_MULTIPLIER);
     }
 
     /**
-     * Schneller Capture-Wert für MVV-LVA
+     * Get capture value for MVV-LVA ordering
      */
-    public static int getCaptureValue(GameState state, int toSquare) {
-        // Wächter schlagen?
-        long toBit = GameState.bit(toSquare);
-        if ((state.redGuard & toBit) != 0 || (state.blueGuard & toBit) != 0) {
-            return GUARD_CAPTURE;
+    public static int getCaptureValue(boolean isGuardCapture, int capturedTowerHeight) {
+        if (isGuardCapture) {
+            return GUARD_CAPTURE_VALUE;
         }
-
-        // Turm schlagen?
-        int redHeight = state.redStackHeights[toSquare];
-        int blueHeight = state.blueStackHeights[toSquare];
-        int capturedHeight = Math.max(redHeight, blueHeight);
-
-        if (capturedHeight > 0) {
-            return TOWER_CAPTURE_BASE + (capturedHeight * HEIGHT_CAPTURE_BONUS);
-        }
-
-        return 0; // Leeres Feld
+        return TOWER_CAPTURE_BASE + (capturedTowerHeight * TOWER_HEIGHT_MULTIPLIER);
     }
 
     /**
-     * Angreifer-Wert für LVA (Least Valuable Attacker)
+     * Get piece value for attacker (LVA - Least Valuable Attacker)
      */
-    public static int getAttackerValue(GameState state, int fromSquare) {
-        long fromBit = GameState.bit(fromSquare);
-
-        // Wächter greift an
-        if ((state.redGuard & fromBit) != 0 || (state.blueGuard & fromBit) != 0) {
+    public static int getAttackerValue(boolean isGuardAttacker, int attackerTowerHeight) {
+        if (isGuardAttacker) {
             return GUARD_VALUE;
         }
+        return getTowerValue(attackerTowerHeight);
+    }
 
-        // Turm greift an
-        int redHeight = state.redStackHeights[fromSquare];
-        int blueHeight = state.blueStackHeights[fromSquare];
-        int attackerHeight = Math.max(redHeight, blueHeight);
+    /**
+     * Calculate MVV-LVA score for move ordering
+     * Higher scores = better captures (capture valuable piece with cheap piece)
+     */
+    public static int getMVVLVAScore(GameState state, int from, int to) {
+        // Determine what's being captured
+        long toBit = GameState.bit(to);
+        boolean capturesGuard = ((state.redGuard | state.blueGuard) & toBit) != 0;
+        int capturedTowerHeight = Math.max(state.redStackHeights[to], state.blueStackHeights[to]);
 
-        if (attackerHeight > 0) {
-            return getTowerValue(attackerHeight);
+        if (!capturesGuard && capturedTowerHeight == 0) {
+            return 0; // No capture
         }
 
+        // Determine what's attacking
+        long fromBit = GameState.bit(from);
+        boolean attackerIsGuard = ((state.redGuard | state.blueGuard) & fromBit) != 0;
+        int attackerTowerHeight = Math.max(state.redStackHeights[from], state.blueStackHeights[from]);
+
+        // Calculate MVV-LVA: High victim value - Low attacker value
+        int victimValue = getCaptureValue(capturesGuard, capturedTowerHeight);
+        int attackerValue = getAttackerValue(attackerIsGuard, attackerTowerHeight);
+
+        return victimValue * 10 - attackerValue; // Scale victim value higher
+    }
+
+    /**
+     * Simple capture detection
+     */
+    public static boolean isCapture(GameState state, int from, int to) {
+        long toBit = GameState.bit(to);
+        return ((state.redGuard | state.blueGuard) & toBit) != 0 ||
+                state.redStackHeights[to] > 0 || state.blueStackHeights[to] > 0;
+    }
+
+    // === POSITIONAL VALUE LOOKUPS ===
+
+    /**
+     * Get file bonus (D-file is most important)
+     */
+    public static int getDFileBonus(int square) {
+        int file = square % 7;
+        if (file == 3) return D_FILE_BONUS;      // D-file (central)
+        if (file == 2 || file == 4) return 25;  // C and E files
         return 0;
     }
 
     /**
-     * MVV-LVA Score: Maximize Victim Value, Minimize Attacker Value
-     * SCHNELL - keine Evaluation-Aufrufe!
-     */
-    public static int getMVVLVAScore(GameState state, int fromSquare, int toSquare) {
-        int victimValue = getCaptureValue(state, toSquare);
-        int attackerValue = getAttackerValue(state, fromSquare);
-
-        // Standard MVV-LVA Formel
-        return victimValue * 100 - attackerValue;
-    }
-
-    // === TURM & WÄCHTER POSITIONAL BONUSES (EINFACH) ===
-
-    /**
-     * D-File Bonus (wichtig in Turm & Wächter)
-     */
-    public static int getDFileBonus(int square) {
-        int file = square % 7;
-        return file == 3 ? 50 : 0; // D-file ist File 3
-    }
-
-    /**
-     * Zentral-Kontrolle Bonus
+     * Central control bonus
      */
     public static int getCentralBonus(int square) {
         int file = square % 7;
         int rank = square / 7;
 
-        // D-file bekommt höchsten Bonus
-        if (file == 3) return 50;
+        // D-file gets highest bonus
+        if (file == 3) return CENTER_FILE_BONUS;
 
-        // C und E files bekommen mittleren Bonus
-        if (file == 2 || file == 4) return 25;
+        // Central files get medium bonus
+        if (file >= 2 && file <= 4) return CENTER_FILE_BONUS / 2;
 
-        // Zentrale Reihen bekommen kleinen Bonus
+        // Central ranks get small bonus
         if (rank >= 2 && rank <= 4) return 10;
 
         return 0;
     }
 
     /**
-     * Wächter-Advancement Bonus (Richtung gegnerische Burg)
+     * Advancement bonus (moving toward enemy)
      */
-    public static int getGuardAdvancementBonus(int fromSquare, int toSquare, boolean isRed) {
-        int fromRank = fromSquare / 7;
-        int toRank = toSquare / 7;
+    public static int getGuardAdvancementBonus(int from, int to, boolean isRed) {
+        int fromRank = from / 7;
+        int toRank = to / 7;
 
-        if (isRed && toRank > fromRank) return 30; // Rot bewegt sich zu höheren Reihen
-        if (!isRed && toRank < fromRank) return 30; // Blau bewegt sich zu niedrigeren Reihen
+        if (isRed && toRank > fromRank) {
+            return ADVANCEMENT_BONUS; // Red advances up
+        }
+        if (!isRed && toRank < fromRank) {
+            return ADVANCEMENT_BONUS; // Blue advances down
+        }
 
         return 0;
     }
 
     /**
-     * Development Bonus - Figur weg von Grundreihe
+     * Development bonus (piece away from starting position)
      */
     public static int getDevelopmentBonus(int square, boolean isRed) {
         int rank = square / 7;
 
-        if (isRed && rank > 0) return 20;  // Rot weg von Reihe 0
-        if (!isRed && rank < 6) return 20; // Blau weg von Reihe 6
+        if (isRed && rank > 0) return 15;   // Red away from rank 0
+        if (!isRed && rank < 6) return 15;  // Blue away from rank 6
 
         return 0;
     }
 
-    // === SPIEL-SPEZIFISCHE KONSTANTEN ===
+    /**
+     * Castle proximity bonus
+     */
+    public static int getCastleProximityBonus(int square, boolean isRed) {
+        int targetCastle = isRed ? BLUE_CASTLE_SQUARE : RED_CASTLE_SQUARE;
+        int distance = getManhattanDistance(square, targetCastle);
 
-    // Burg-Positionen (wie in Ihrem Code)
-    public static final int RED_CASTLE_SQUARE = GameState.getIndex(6, 3);   // D7
-    public static final int BLUE_CASTLE_SQUARE = GameState.getIndex(0, 3);  // D1
+        // Closer to enemy castle = higher bonus
+        return Math.max(0, CASTLE_PROXIMITY_BONUS - (distance * 20));
+    }
 
-    // Terminal Werte
-    public static final int CHECKMATE_VALUE = 100000;
-    public static final int STALEMATE_VALUE = 0;
-    public static final int DRAW_VALUE = 0;
+    private static int getManhattanDistance(int square1, int square2) {
+        int rank1 = square1 / 7, file1 = square1 % 7;
+        int rank2 = square2 / 7, file2 = square2 % 7;
+        return Math.abs(rank1 - rank2) + Math.abs(file1 - file2);
+    }
 
-    // Search Bounds
+    // === GAME-SPECIFIC CONSTANTS ===
+
+    // Castle squares
+    public static final int RED_CASTLE_SQUARE = 45;    // D7 (6*7 + 3)
+    public static final int BLUE_CASTLE_SQUARE = 3;    // D1 (0*7 + 3)
+
+    // Search bounds
     public static final int ALPHA_INIT = -999999;
     public static final int BETA_INIT = 999999;
     public static final int TIMEOUT_VALUE = 0;
+
+    // Terminal values
+    public static final int CHECKMATE_VALUE = 100000;
+    public static final int STALEMATE_VALUE = 0;
+    public static final int DRAW_VALUE = 0;
 }
