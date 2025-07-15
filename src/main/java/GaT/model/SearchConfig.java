@@ -228,6 +228,7 @@ public class SearchConfig {
             this.complexityTimeModifier = complexityTimeModifier;
         }
 
+
         public long calculateSearchTime() {
             if (totalTimeMs < EMERGENCY_TIME_MS) {
                 return PANIC_TIME_MS;
