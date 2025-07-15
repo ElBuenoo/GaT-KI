@@ -1,73 +1,49 @@
 package GaT;
 
+import GaT.engine.TurmWaechterEngine;
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.search.MoveGenerator;
-
-import static GaT.search.Minimax.evaluate;
+import GaT.search.UnifiedStatistics;
 
 public class Main {
 
-
     public static void main(String[] args) {
+        System.out.println("🚀 Testing Optimized Engine");
+        System.out.println("===========================");
+
+        // Initialize optimized engine
+        TurmWaechterEngine engine = new TurmWaechterEngine();
+
+        // Test position
         GameState state = GameState.fromFen("7/7/7/BG6/3b33/3RG3/7 r");
 
+        System.out.println("📋 Position:");
         state.printBoard();
-        GameState copy = state.copy();
 
+        // Reset statistics
+        UnifiedStatistics.getInstance().reset();
+
+        // Search with 5 second time limit
+        System.out.println("\n🔍 Searching...");
         long startTime = System.currentTimeMillis();
-        Move best = Minimax.findBestMove(state, 5);
-        long endTime = System.currentTimeMillis();
-        copy.applyMove(best);
-        System.out.println("Best move: " + best);
-        System.out.println("Evaluation: "+ evaluate(copy, 0));
-        copy.printBoard();
-        System.out.println("Time taken: "+ (endTime -startTime) + "ms");
-        System.out.println(MoveGenerator.generateAllMoves(state).size());
+        Move bestMove = engine.findBestMove(state, 5000);
+        long searchTime = System.currentTimeMillis() - startTime;
 
+        // Results
+        UnifiedStatistics stats = UnifiedStatistics.getInstance();
 
+        System.out.println("\n✅ RESULTS:");
+        System.out.println("Best Move: " + bestMove);
+        System.out.println("Search Time: " + searchTime + "ms");
+        System.out.println("Max Depth: " + stats.getMaxDepth());
+        System.out.println("Nodes Searched: " + String.format("%,d", stats.getNodeCount()));
+        System.out.println("Nodes/Second: " + String.format("%,d", stats.getNodesPerSecond()));
 
-        System.out.println("=== With Quiescence ===");
-        Minimax.counter = 0;
-        QuiescenceSearch.resetQuiescenceStats();
-
-        startTime = System.currentTimeMillis();
-        Move bestQ = Minimax.findBestMoveWithQuiescence(state, 5);
-        endTime = System.currentTimeMillis();
-
-        GameState copyQ = state.copy();
-        copyQ.applyMove(bestQ);
-        System.out.println("Best move: " + bestQ);
-        System.out.println("Evaluation: "+ evaluate(copyQ, 0));
-        System.out.println("Time taken: "+ (endTime - startTime) + "ms");
-        System.out.println("Regular nodes: " + Minimax.counter);
-        System.out.println("Q-nodes: " + QuiescenceSearch.qNodes);
-
-        System.out.println("\nMoves different: " + !best.equals(bestQ));
-
-
-        // Test tactical position where quiescence should activate
-        System.out.println("\n=== Tactical Position Test ===");
-        GameState tactical = GameState.fromFen("7/7/3b33/BG1r43/3RG3/7/7 r");
-        tactical.printBoard();
-
-        Minimax.counter = 0;
-        QuiescenceSearch.resetQuiescenceStats();
-
-        startTime = System.currentTimeMillis();
-        Move tacticalMove = Minimax.findBestMoveWithQuiescence(tactical, 4);
-        endTime = System.currentTimeMillis();
-
-        System.out.println("Best move: " + tacticalMove);
-        System.out.println("Time: " + (endTime - startTime) + "ms");
-        System.out.println("Regular nodes: " + Minimax.counter);
-        System.out.println("Q-nodes: " + QuiescenceSearch.qNodes);
-
-
+        // Show if move is good
+        if (bestMove != null) {
+            System.out.println("✅ Search works!");
+        } else {
+            System.out.println("❌ Search failed!");
+        }
     }
-
-
-
-
-
 }

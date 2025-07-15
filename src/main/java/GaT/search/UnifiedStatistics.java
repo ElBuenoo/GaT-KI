@@ -140,4 +140,14 @@ public class UnifiedStatistics {
      * Ersetzt QuiescenceSearch.standPatCutoffs
      */
     public long getStandPatCutoffsCount() { return standPatCutoffs; }
+
+// === MISSING METHODS FOR BENCHMARK COMPATIBILITY ===
+
+    /**
+     * Calculate first move cutoff rate (needed for benchmarks)
+     */
+    public double getFirstMoveCutoffRate() {
+        return alphaBetaCutoffs > 0 ? (double) firstMoveCutoffs / alphaBetaCutoffs : 0.0;
+    }
+
 }
