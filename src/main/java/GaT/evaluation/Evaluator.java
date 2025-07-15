@@ -1,5 +1,6 @@
 package GaT.evaluation;
 
+import GaT.model.ConsolidatedSearchConfig;
 import GaT.model.GameState;
 import GaT.search.MoveGenerator;
 import GaT.model.Move;
@@ -824,7 +825,7 @@ public class Evaluator {
      */
     public static void setRemainingTime(long timeMs) {
         // Adjust evaluation behavior based on remaining time
-        if (timeMs < SearchConfig.EMERGENCY_TIME_MS) {
+        if (timeMs < ConsolidatedSearchConfig.EMERGENCY_TIME_MS) {
             // In emergency mode, use faster/simpler evaluation
             System.out.println("🚨 Emergency mode: Using simplified evaluation");
         }

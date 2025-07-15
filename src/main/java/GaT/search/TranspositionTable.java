@@ -1,5 +1,6 @@
 package GaT.search;
 
+import GaT.model.ConsolidatedSearchConfig;
 import GaT.model.TTEntry;
 
 import java.util.HashMap;
@@ -30,7 +31,7 @@ public class TranspositionTable {
     // === CONSTRUCTOR WITH SEARCHCONFIG ===
     public TranspositionTable(int maxSize) {
         // Validate against SearchConfig
-        if (maxSize != SearchConfig.TT_SIZE) {
+        if (maxSize != ConsolidatedSearchConfig.TT_SIZE) {
             System.out.println("⚠️ TranspositionTable size (" + maxSize + ") differs from SearchConfig.TT_SIZE (" + SearchConfig.TT_SIZE + ")");
         }
 
@@ -38,8 +39,8 @@ public class TranspositionTable {
         this.table = new HashMap<>(maxSize * 4 / 3); // Avoid rehashing
 
         System.out.println("🔧 TranspositionTable initialized with SearchConfig:");
-        System.out.println("   TT_SIZE: " + SearchConfig.TT_SIZE);
-        System.out.println("   TT_EVICTION_THRESHOLD: " + SearchConfig.TT_EVICTION_THRESHOLD);
+        System.out.println("   TT_SIZE: " + ConsolidatedSearchConfig.TT_SIZE);
+        System.out.println("   TT_EVICTION_THRESHOLD: " + ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD);
         System.out.println("   Actual maxSize: " + maxSize);
 
         validateSearchConfigIntegration();
@@ -49,7 +50,7 @@ public class TranspositionTable {
      * Default constructor using SearchConfig.TT_SIZE
      */
     public TranspositionTable() {
-        this(SearchConfig.TT_SIZE);
+        this(ConsolidatedSearchConfig.TT_SIZE);
     }
 
     /**
@@ -94,7 +95,7 @@ public class TranspositionTable {
         }
 
         // Check if we need to evict entries using SearchConfig threshold
-        if (table.size() >= SearchConfig.TT_EVICTION_THRESHOLD) {
+        if (table.size() >= ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD) {
             evictOldEntriesWithConfig();
         }
 
@@ -107,7 +108,7 @@ public class TranspositionTable {
      */
     private void evictOldEntriesWithConfig() {
         // Calculate eviction percentage based on SearchConfig
-        int targetSize = (int)(SearchConfig.TT_EVICTION_THRESHOLD * 0.8); // Keep 80% after eviction
+        int targetSize = (int)(ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD * 0.8); // Keep 80% after eviction
         int toRemove = table.size() - targetSize;
 
         if (toRemove <= 0) return;
@@ -134,7 +135,7 @@ public class TranspositionTable {
         evictionCount += toEvict.size();
 
         System.out.printf("🔧 TT Eviction: Removed %d entries, size now: %d (threshold: %d)\n",
-                toEvict.size(), table.size(), SearchConfig.TT_EVICTION_THRESHOLD);
+                toEvict.size(), table.size(), ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD);
     }
 
     /**
@@ -176,7 +177,7 @@ public class TranspositionTable {
         // Consider entry too old if it hasn't been accessed in a long time
         // and we have many accesses since then
         long ageDifference = accessCounter - entry.lastAccessed;
-        return ageDifference > SearchConfig.TT_SIZE / 10; // Entry older than 10% of table size worth of accesses
+        return ageDifference > ConsolidatedSearchConfig.TT_SIZE / 10; // Entry older than 10% of table size worth of accesses
     }
 
     /**
@@ -192,7 +193,7 @@ public class TranspositionTable {
         evictionCount = 0;
 
         System.out.printf("🔧 TranspositionTable cleared: %d entries removed (SearchConfig.TT_SIZE: %d)\n",
-                oldSize, SearchConfig.TT_SIZE);
+                oldSize, ConsolidatedSearchConfig.TT_SIZE);
     }
 
     /**
@@ -213,7 +214,7 @@ public class TranspositionTable {
      * Get SearchConfig eviction threshold
      */
     public int getEvictionThreshold() {
-        return SearchConfig.TT_EVICTION_THRESHOLD;
+        return ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD;
     }
 
     /**
@@ -243,7 +244,7 @@ public class TranspositionTable {
      * Check if table is near eviction threshold
      */
     public boolean isNearEvictionThreshold() {
-        return table.size() > SearchConfig.TT_EVICTION_THRESHOLD * 0.9;
+        return table.size() > ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD * 0.9;
     }
 
     /**
@@ -254,8 +255,8 @@ public class TranspositionTable {
         sb.append("=== TRANSPOSITION TABLE STATISTICS (SearchConfig) ===\n");
         sb.append(String.format("Size: %,d / %,d (%.1f%% utilized)\n",
                 table.size(), maxSize, getUtilization()));
-        sb.append(String.format("SearchConfig TT_SIZE: %,d\n", SearchConfig.TT_SIZE));
-        sb.append(String.format("SearchConfig TT_EVICTION_THRESHOLD: %,d\n", SearchConfig.TT_EVICTION_THRESHOLD));
+        sb.append(String.format("SearchConfig TT_SIZE: %,d\n", ConsolidatedSearchConfig.TT_SIZE));
+        sb.append(String.format("SearchConfig TT_EVICTION_THRESHOLD: %,d\n", ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD));
         sb.append(String.format("Accesses: %,d total (%,d hits, %,d misses)\n",
                 hitCount + missCount, hitCount, missCount));
         sb.append(String.format("Hit Rate: %.1f%%\n", getHitRate() * 100));
@@ -284,22 +285,22 @@ public class TranspositionTable {
     private void validateSearchConfigIntegration() {
         boolean valid = true;
 
-        if (SearchConfig.TT_SIZE <= 0) {
-            System.err.println("❌ Invalid SearchConfig.TT_SIZE: " + SearchConfig.TT_SIZE);
+        if (ConsolidatedSearchConfig.TT_SIZE <= 0) {
+            System.err.println("❌ Invalid SearchConfig.TT_SIZE: " + ConsolidatedSearchConfig.TT_SIZE);
             valid = false;
         }
 
-        if (SearchConfig.TT_EVICTION_THRESHOLD <= 0) {
+        if (ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD <= 0) {
             System.err.println("❌ Invalid SearchConfig.TT_EVICTION_THRESHOLD: " + SearchConfig.TT_EVICTION_THRESHOLD);
             valid = false;
         }
 
-        if (SearchConfig.TT_EVICTION_THRESHOLD > SearchConfig.TT_SIZE) {
+        if (ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD > ConsolidatedSearchConfig.TT_SIZE) {
             System.err.println("❌ TT_EVICTION_THRESHOLD should not exceed TT_SIZE");
             valid = false;
         }
 
-        if (maxSize != SearchConfig.TT_SIZE) {
+        if (maxSize != ConsolidatedSearchConfig.TT_SIZE) {
             System.out.println("⚠️ Table maxSize differs from SearchConfig.TT_SIZE - using maxSize: " + maxSize);
         }
 
@@ -328,7 +329,7 @@ public class TranspositionTable {
 
         // Remove entries that are clearly outdated
         int removedCount = 0;
-        long threshold = accessCounter - (SearchConfig.TT_SIZE / 5); // Remove very old entries
+        long threshold = accessCounter - (ConsolidatedSearchConfig.TT_SIZE / 5); // Remove very old entries
 
         table.entrySet().removeIf(entry -> {
             if (entry.getValue().lastAccessed < threshold) {
@@ -376,7 +377,7 @@ public class TranspositionTable {
      */
     public boolean needsResize() {
         // Suggest resize if frequently hitting eviction threshold
-        return evictionCount > 100 && table.size() >= SearchConfig.TT_EVICTION_THRESHOLD;
+        return evictionCount > 100 && table.size() >= ConsolidatedSearchConfig.TT_EVICTION_THRESHOLD;
     }
 
     /**

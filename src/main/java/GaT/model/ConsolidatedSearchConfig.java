@@ -1,33 +1,33 @@
 package GaT.model;
 
 /**
- * CONSOLIDATED SEARCH CONFIG - 18 essenzielle Parameter statt 100+
+ * COMPLETE CONSOLIDATED SEARCH CONFIG
  *
- * Ersetzt Ihr überladenes SearchConfig mit den wirklich wichtigen Konstanten
- * Kompilier-Zeit Konstanten = 5-8% schnellere Parameter-Lookups
+ * All constants needed for the refactored engine integration.
+ * This replaces 100+ SearchConfig parameters with 18 essential ones.
  */
 public final class ConsolidatedSearchConfig {
 
-    // === GRUNDLEGENDE LIMITS ===
+    // === BASIC LIMITS ===
     public static final int MAX_DEPTH = 64;
     public static final int MAX_QUIESCENCE_DEPTH = 4;
 
-    // === ZEIT-MANAGEMENT ===
+    // === TIME MANAGEMENT ===
     public static final long DEFAULT_TIME_LIMIT_MS = 5000L;
     public static final long EMERGENCY_TIME_MS = 200L;
     public static final long PANIC_TIME_MS = 50L;
 
     // === TRANSPOSITION TABLE ===
-    public static final int TT_SIZE_BITS = 23;  // 2^23 = ~8M Einträge
+    public static final int TT_SIZE_BITS = 23;  // 2^23 = ~8M entries
     public static final int TT_SIZE = 1 << TT_SIZE_BITS;
 
-    // === PRUNING SCHWELLENWERTE ===
+    // === PRUNING PARAMETERS ===
     public static final int NULL_MOVE_MIN_DEPTH = 3;
     public static final int NULL_MOVE_REDUCTION = 3;
     public static final int FUTILITY_MARGIN = 200;
     public static final int DELTA_PRUNING_MARGIN = 300;
 
-    // === LATE MOVE REDUCTIONS ===
+    // === LATE MOVE REDUCTION ===
     public static final int LMR_MIN_DEPTH = 3;
     public static final int LMR_MIN_MOVES = 4;
     public static final int LMR_REDUCTION = 1;
@@ -40,10 +40,14 @@ public final class ConsolidatedSearchConfig {
     public static final int ASPIRATION_DELTA = 50;
     public static final int ASPIRATION_MAX_RETRIES = 3;
 
-    // === PERFORMANCE ZIELE ===
+    // === PERFORMANCE TARGETS ===
     public static final int TARGET_NODES_PER_SECOND = 1_000_000;
 
-    // === SEARCH STRATEGIEN (vereinfacht) ===
+    // === GAME-SPECIFIC CONSTANTS ===
+    public static final int RED_CASTLE_INDEX = 45;   // D7 on 7x7 board
+    public static final int BLUE_CASTLE_INDEX = 3;   // D1 on 7x7 board
+
+    // === SEARCH STRATEGIES ===
     public enum Strategy {
         ALPHA_BETA,        // Basic Alpha-Beta
         PVS,              // Principal Variation Search
@@ -58,34 +62,17 @@ public final class ConsolidatedSearchConfig {
     public static final int MIN_EVAL = -999999;
     public static final int MAX_EVAL = 999999;
 
-    // === TURM & WÄCHTER SPEZIFISCHE PARAMETER ===
-
-    // Burgen (wie in Ihrem GameState)
-    public static final int RED_CASTLE_INDEX = 45;   // D7 auf 7x7 Board
-    public static final int BLUE_CASTLE_INDEX = 3;   // D1 auf 7x7 Board
-
-    // === UTILITY METHODEN (Smart Defaults) ===
+    // === UTILITY METHODS ===
 
     /**
-     * Berechne Aspiration Window Bounds
-     */
-    public static int[] getAspirationBounds(int previousScore, int iteration) {
-        int delta = ASPIRATION_DELTA * (1 << Math.min(iteration, 4)); // Exponentielles Wachstum
-        return new int[] {
-                Math.max(MIN_EVAL, previousScore - delta),
-                Math.min(MAX_EVAL, previousScore + delta)
-        };
-    }
-
-    /**
-     * Berechne LMR Reduktion
+     * Calculate LMR reduction based on depth and move index
      */
     public static int getLMRReduction(int depth, int moveIndex) {
         if (depth < LMR_MIN_DEPTH || moveIndex < LMR_MIN_MOVES) {
             return 0;
         }
 
-        // Einfache LMR Formel für Turm & Wächter
+        // Simple reduction formula
         int reduction = LMR_REDUCTION;
         if (depth >= 6 && moveIndex >= 8) reduction++;
         if (depth >= 10 && moveIndex >= 16) reduction++;
@@ -94,36 +81,10 @@ public final class ConsolidatedSearchConfig {
     }
 
     /**
-     * Null-Move Pruning erlaubt?
-     */
-    public static boolean allowNullMove(int depth, int eval, int beta) {
-        return depth >= NULL_MOVE_MIN_DEPTH && eval >= beta;
-    }
-
-    /**
-     * Futility Pruning erlaubt?
-     */
-    public static boolean allowFutilityPruning(int depth, int eval, int alpha) {
-        return depth <= 3 && eval + FUTILITY_MARGIN < alpha;
-    }
-
-    /**
-     * Zeit-Allokation für Iterative Deepening
-     */
-    public static long[] getTimeAllocation(long totalTime) {
-        // Allokiere Zeit: 10% Notfall, 30% Komfort, 60% Normal
-        long emergency = totalTime / 10;
-        long comfort = totalTime * 3 / 10;
-        long normal = totalTime - emergency - comfort;
-
-        return new long[] { emergency, comfort, normal };
-    }
-
-    /**
-     * Check ob Zeit für nächste Iteration
+     * Check if we have time for another iteration
      */
     public static boolean hasTimeForIteration(long elapsed, long allocated, int depth) {
-        // Einfache Heuristik: nächste Iteration braucht ~4x so lange
+        // Simple heuristic: next iteration takes ~4x longer
         long estimatedNext = elapsed * 4;
         long remaining = allocated - elapsed;
 
@@ -131,23 +92,60 @@ public final class ConsolidatedSearchConfig {
     }
 
     /**
-     * Emergency Mode Detection
+     * Check if we're in panic mode (very little time left)
+     */
+    public static boolean isPanicMode(long timeRemaining) {
+        return timeRemaining <= PANIC_TIME_MS;
+    }
+
+    /**
+     * Check if we're in emergency mode
      */
     public static boolean isEmergencyMode(long timeRemaining) {
         return timeRemaining <= EMERGENCY_TIME_MS;
     }
 
     /**
-     * Panic Mode Detection
+     * Get aspiration window bounds
      */
-    public static boolean isPanicMode(long timeRemaining) {
-        return timeRemaining <= PANIC_TIME_MS;
+    public static int[] getAspirationBounds(int previousScore, int iteration) {
+        int delta = ASPIRATION_DELTA * (1 << Math.min(iteration, 4));
+        return new int[] {
+                Math.max(MIN_EVAL, previousScore - delta),
+                Math.min(MAX_EVAL, previousScore + delta)
+        };
+    }
+
+    /**
+     * Check if null move pruning is allowed
+     */
+    public static boolean allowNullMove(int depth, int eval, int beta) {
+        return depth >= NULL_MOVE_MIN_DEPTH && eval >= beta;
+    }
+
+    /**
+     * Check if futility pruning is allowed
+     */
+    public static boolean allowFutilityPruning(int depth, int eval, int alpha) {
+        return depth <= 3 && eval + FUTILITY_MARGIN < alpha;
+    }
+
+    /**
+     * Get time allocation breakdown
+     */
+    public static long[] getTimeAllocation(long totalTime) {
+        // Emergency: 10%, Comfort: 30%, Normal: 60%
+        long emergency = totalTime / 10;
+        long comfort = totalTime * 3 / 10;
+        long normal = totalTime - emergency - comfort;
+
+        return new long[] { emergency, comfort, normal };
     }
 
     // === VALIDATION ===
 
     /**
-     * Konfiguration validieren beim Start
+     * Validate configuration at startup
      */
     public static void validate() {
         assert MAX_DEPTH > 0 : "MAX_DEPTH must be positive";
@@ -158,24 +156,23 @@ public final class ConsolidatedSearchConfig {
         assert LMR_MIN_DEPTH >= 1 : "LMR_MIN_DEPTH must be at least 1";
 
         System.out.println("✅ ConsolidatedSearchConfig validation passed");
-        System.out.println("   18 essential parameters (vs 100+ in old SearchConfig)");
         System.out.printf("   Target: %,d NPS, TT Size: %,d entries\n",
                 TARGET_NODES_PER_SECOND, TT_SIZE);
     }
 
-    // === PERFORMANCE COMPARISON ===
-
     /**
-     * Zeige Vereinfachung vs. altes SearchConfig
+     * Get configuration summary
      */
-    public static String getSimplificationSummary() {
+    public static String getConfigSummary() {
         return String.format(
-                "ConsolidatedSearchConfig: 18 parameters (vs 100+ in SearchConfig)\n" +
-                        "- Removed: 80+ rarely-used parameters\n" +
-                        "- Kept: Core search logic essentials\n" +
-                        "- Added: Smart utility methods\n" +
-                        "- Performance: 5-8%% faster parameter access\n" +
-                        "- Maintainability: Much simpler to tune and debug"
+                "ConsolidatedSearchConfig: 18 essential parameters\n" +
+                        "- Strategy: %s\n" +
+                        "- Max Depth: %d, Quiescence Depth: %d\n" +
+                        "- TT Size: %,d entries\n" +
+                        "- Time Limits: Emergency=%dms, Panic=%dms\n" +
+                        "- Target NPS: %,d",
+                DEFAULT_STRATEGY, MAX_DEPTH, MAX_QUIESCENCE_DEPTH,
+                TT_SIZE, EMERGENCY_TIME_MS, PANIC_TIME_MS, TARGET_NODES_PER_SECOND
         );
     }
 
