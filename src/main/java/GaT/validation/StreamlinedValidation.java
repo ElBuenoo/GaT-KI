@@ -1,6 +1,7 @@
 package GaT.validation;
 
 import GaT.model.*;
+import GaT.search.TerminalPositionDetector;
 
 /**
  * STREAMLINED VALIDATION - Phase 3 Component 1

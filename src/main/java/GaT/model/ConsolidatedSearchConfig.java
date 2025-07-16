@@ -100,6 +100,45 @@ public final class ConsolidatedSearchConfig {
         throw new AssertionError("Utility class - do not instantiate");
     }
 
+    public static boolean hasTimeForIteration(long elapsed, long total, int depth) {
+        if (total <= 0) return false;
+
+        long remaining = total - elapsed;
+
+        // No time if we're in panic mode
+        if (isPanicMode(remaining)) {
+            return false;
+        }
+
+        // Estimate time for next iteration (exponential growth)
+        long estimatedNext = estimateIterationTime(depth, elapsed);
+
+        // Need at least 1.5x estimated time to start
+        return remaining > estimatedNext * 3 / 2;
+    }
+
+    /**
+     * Check if we're in panic mode
+     */
+    public static boolean isPanicMode(long remainingTimeMs) {
+        return remainingTimeMs <= PANIC_TIME_MS;
+    }
+
+    /**
+     * Estimate time needed for next iteration
+     */
+    private static long estimateIterationTime(int currentDepth, long elapsedTime) {
+        if (elapsedTime <= 0) {
+            return EMERGENCY_TIME_MS;
+        }
+
+        // Next iteration typically takes 3-5x longer
+        double growthFactor = currentDepth < 8 ? 4.0 : 3.0;
+        long averagePerIteration = elapsedTime / Math.max(currentDepth, 1);
+
+        return (long)(averagePerIteration * growthFactor);
+    }
+
     // === STATIC INITIALIZATION ===
     static {
         validate();

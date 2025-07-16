@@ -206,7 +206,7 @@ public class GameClient {
             if (parts.length >= 3) {
                 int from = Integer.parseInt(parts[1]);
                 int to = Integer.parseInt(parts[2]);
-                return new Move(from, to);
+                return new Move(from, to,1);
             }
         } catch (Exception e) {
             System.err.println("❌ Failed to parse opponent move: " + e.getMessage());

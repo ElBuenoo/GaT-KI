@@ -649,4 +649,33 @@ public class GameState {
                 redGuardCount, redTowerCount, blueGuardCount, blueTowerCount,
                 redToMove ? "RED" : "BLUE");
     }
+
+    public GameState makeMove(Move move) {
+        GameState newState = this.copy(); // Create copy first
+        newState.applyMove(move);         // Apply move to copy
+        return newState;                  // Return the new state
+    }
+
+    public String toFen() {
+        // Simple FEN implementation - adapt to your board representation
+        StringBuilder sb = new StringBuilder();
+
+        // Convert board state to FEN string
+        for (int i = 0; i < 49; i++) {
+            if ((redGuard & bit(i)) != 0) sb.append('G');
+            else if ((blueGuard & bit(i)) != 0) sb.append('g');
+            else if (redStackHeights[i] > 0) sb.append(redStackHeights[i]);
+            else if (blueStackHeights[i] > 0) sb.append((char)('a' + blueStackHeights[i] - 1));
+            else sb.append('.');
+
+            if (i % 7 == 6 && i < 48) sb.append('/');
+        }
+
+        sb.append(' ').append(redToMove ? 'r' : 'b');
+        return sb.toString();
+    }
+
+    public static GameState getStartingPosition() {
+        return new GameState(); // Uses your existing constructor
+    }
 }
