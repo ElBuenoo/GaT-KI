@@ -4,17 +4,16 @@ import java.util.List;
 
 import GaT.evaluation.Evaluator;
 import GaT.search.MoveGenerator;
-import GaT.search.PVSSearch;
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
 import GaT.engine.TimeManager;
 import GaT.engine.TimedMinimax;
 import GaT.search.Minimax;
-import GaT.search.QuiescenceSearch;
-import GaT.search.SearchStatistics;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import GaT.search.UnifiedStatistics;
+
+
 
 /**
  * FIXED OPTIMIZED GAME CLIENT with Socket Timeout & Adaptive Polling
@@ -218,7 +217,7 @@ public class GameClient {
                         System.out.println("📥 Move response: " + moveResponse);
 
                         // Show search statistics
-                        SearchStatistics stats = SearchStatistics.getInstance();
+                        UnifiedStatistics stats = UnifiedStatistics.getInstance();
                         System.out.printf("📊 Nodes: %,d (regular: %,d, quiescence: %,d)%n",
                                 stats.getTotalNodes(), stats.getNodeCount(), stats.getQNodeCount());
 
@@ -440,7 +439,7 @@ public class GameClient {
 
         // Print search statistics if available
         try {
-            SearchStatistics stats = SearchStatistics.getInstance();
+            UnifiedStatistics stats = UnifiedStatistics.getInstance();
             if (stats != null) {
                 System.out.println(stats.getComprehensiveSummaryWithConfig());
             }

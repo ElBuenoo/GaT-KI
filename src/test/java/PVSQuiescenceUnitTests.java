@@ -1,6 +1,5 @@
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
 import GaT.search.*;
 import GaT.evaluation.Evaluator;
 import GaT.engine.TimedMinimax;
@@ -17,7 +16,7 @@ public class PVSQuiescenceUnitTests {
     private Evaluator evaluator;
     private MoveOrdering moveOrdering;
     private TranspositionTable transpositionTable;
-    private SearchStatistics statistics;
+    private UnifiedStatistics statistics;
 
     @Before
     public void setUp() {
@@ -25,7 +24,7 @@ public class PVSQuiescenceUnitTests {
         evaluator = new Evaluator();
         moveOrdering = new MoveOrdering();
         transpositionTable = new TranspositionTable(10000);
-        statistics = SearchStatistics.getInstance();
+        statistics = UnifiedStatistics.getInstance();
         searchEngine = new SearchEngine(evaluator, moveOrdering, transpositionTable, statistics);
 
         // Reset statistics

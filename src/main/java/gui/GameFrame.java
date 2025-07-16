@@ -5,7 +5,7 @@ import GaT.model.Move;
 import GaT.engine.TimedMinimax;
 import GaT.search.Minimax;
 import GaT.search.MoveGenerator;
-import GaT.model.SearchConfig;
+import GaT.model.ConsolidatedSearchConfig;
 
 import javax.swing.*;
 import java.awt.*;
@@ -878,11 +878,11 @@ public class GameFrame extends JFrame {
                 currentState.printBoard();
 
                 // Test different strategies
-                SearchConfig.SearchStrategy[] strategies = SearchConfig.SearchStrategy.values();
+                ConsolidatedSearchConfig.SearchStrategy[] strategies = ConsolidatedSearchConfig.SearchStrategy.values();
 
                 StringBuilder results = new StringBuilder("Strategy Comparison Results (FIXED):\n\n");
 
-                for (SearchConfig.SearchStrategy strategy : strategies) {
+                for (ConsolidatedSearchConfig.SearchStrategy strategy : strategies) {
                     long startTime = System.currentTimeMillis();
 
                     Move move = null;

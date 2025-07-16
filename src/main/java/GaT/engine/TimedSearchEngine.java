@@ -6,6 +6,7 @@ import GaT.evaluation.Evaluator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+
 /**
  * TIMED SEARCH ENGINE - COMPLETE SEARCHCONFIG INTEGRATION
  *
@@ -37,18 +38,18 @@ public class TimedSearchEngine {
     public TimedSearchEngine(Evaluator evaluator, TimeManager timeManager) {
         this.searchEngine = new SearchEngine(
                 evaluator,
-                new MoveOrdering(),
+                new FastMoveOrdering(),
                 new TranspositionTable(SearchConfig.TT_SIZE),
-                SearchStatistics.getInstance()
+                UnifiedStatistics.getInstance()
         );
         this.evaluator = evaluator;
         this.timeManager = timeManager;
         this.statistics = SearchStatistics.getInstance();
 
         System.out.println("🚀 TimedSearchEngine initialized with SearchConfig:");
-        System.out.println("   TT_SIZE: " + SearchConfig.TT_SIZE);
-        System.out.println("   EMERGENCY_TIME_MS: " + SearchConfig.EMERGENCY_TIME_MS);
-        System.out.println("   CHECKMATE_THRESHOLD: " + SearchConfig.CHECKMATE_THRESHOLD);
+        System.out.println("   TT_SIZE: " + ConsolidatedSearchConfig.TT_SIZE);
+        System.out.println("   EMERGENCY_TIME_MS: " + ConsolidatedSearchConfig.EMERGENCY_TIME_MS);
+        System.out.println("   CHECKMATE_THRESHOLD: " + ConsolidatedSearchConfig.CHECKMATE_THRESHOLD);
     }
 
     /**
@@ -61,14 +62,14 @@ public class TimedSearchEngine {
         searchActive.set(true);
         searchStartTime = System.currentTimeMillis();
         timeLimit = timeLimitMs;
-        emergencyMode = timeLimitMs < SearchConfig.EMERGENCY_TIME_MS;
+        emergencyMode = timeLimitMs < ConsolidatedSearchConfig.EMERGENCY_TIME_MS;
 
         statistics.reset();
         statistics.startSearch();
 
         // === EMERGENCY HANDLING USING SEARCHCONFIG ===
         if (emergencyMode) {
-            System.out.println("🚨 EMERGENCY MODE: " + timeLimitMs + "ms (threshold: " + SearchConfig.EMERGENCY_TIME_MS + "ms)");
+            System.out.println("🚨 EMERGENCY MODE: " + timeLimitMs + "ms (threshold: " + ConsolidatedSearchConfig.EMERGENCY_TIME_MS + "ms)");
             return handleEmergencySearchWithConfig(state, strategy);
         }
 
@@ -78,8 +79,8 @@ public class TimedSearchEngine {
             adaptiveTimeLimit = Math.min(timeLimitMs, timeManager.calculateTimeForMove(state));
             // Use SearchConfig time factors
             adaptiveTimeLimit = Math.max(
-                    (long)(timeLimitMs * SearchConfig.TIME_MIN_FACTOR),
-                    Math.min(adaptiveTimeLimit, (long)(timeLimitMs * SearchConfig.TIME_MAX_FACTOR))
+                    (long)(timeLimitMs * ConsolidatedSearchConfig.TIME_MIN_FACTOR),
+                    Math.min(adaptiveTimeLimit, (long)(timeLimitMs * ConsolidatedSearchConfig.TIME_MAX_FACTOR))
             );
         } catch (Exception e) {
             System.err.println("⚠️ Time calculation failed, using safe default: " + e.getMessage());
@@ -324,7 +325,7 @@ public class TimedSearchEngine {
                     GameState copy = state.copy();
                     copy.applyMove(move);
 
-                    int score = searchEngine.search(copy, depth - 1, alpha, beta, !isRed, strategy);
+                    int score = searchEngine.search(copy, depth - 1, alpha, beta, !isRed, ConsolidatedSearchConfig.DEFAULT_STRATEGY);
 
                     if ((isRed && score > bestScore) || (!isRed && score < bestScore) || bestMove == null) {
                         bestScore = score;

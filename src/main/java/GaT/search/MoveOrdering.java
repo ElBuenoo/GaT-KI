@@ -3,7 +3,7 @@ package GaT.search;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.TTEntry;
-import GaT.model.SearchConfig;
+import GaT.model.ConsolidatedSearchConfig;
 
 import java.util.List;
 

@@ -1,7 +1,7 @@
 package GaT.search;
 
 import GaT.model.TTEntry;
-import GaT.model.SearchConfig;
+import GaT.model.ConsolidatedSearchConfig;
 
 import java.util.HashMap;
 import java.util.List;

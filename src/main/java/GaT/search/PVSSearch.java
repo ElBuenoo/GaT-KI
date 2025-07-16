@@ -2,7 +2,8 @@ package GaT.search;
 
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
+import GaT.model.ConsolidatedSearchConfig;
+
 import GaT.model.TTEntry;
 
 import java.util.List;
@@ -22,8 +23,8 @@ import java.util.function.BooleanSupplier;
 public class PVSSearch {
 
     // === DEPENDENCIES ===
-    private static final MoveOrdering moveOrdering = new MoveOrdering();
-    private static final SearchStatistics statistics = SearchStatistics.getInstance();
+    private static final FastMoveOrdering moveOrdering = new FastMoveOrdering();
+    private static final UnifiedStatistics statistics = UnifiedStatistics.getInstance();
 
     // === TIMEOUT MANAGEMENT ===
     private static BooleanSupplier timeoutChecker = null;

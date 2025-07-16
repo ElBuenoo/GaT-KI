@@ -3,7 +3,8 @@ package GaT.search;
 import GaT.model.GameState;
 import GaT.model.Move;
 import GaT.model.TTEntry;
-import GaT.model.SearchConfig;
+import GaT.model.ConsolidatedSearchConfig;
+
 import GaT.evaluation.Evaluator; // Your new unified evaluator
 
 import java.util.List;
@@ -23,9 +24,10 @@ public class Minimax {
 
     // === CORE COMPONENTS WITH UNIFIED EVALUATOR ===
     private static final Evaluator evaluator = new Evaluator(); // Single unified evaluator instance
-    private static final MoveOrdering moveOrdering = new MoveOrdering();
-    private static final TranspositionTable transpositionTable = new TranspositionTable(SearchConfig.TT_SIZE);
-    private static final SearchStatistics statistics = SearchStatistics.getInstance();
+    private static final FastMoveOrdering moveOrdering = new FastMoveOrdering();
+    private static final TranspositionTable transpositionTable = new TranspositionTable(ConsolidatedSearchConfig.TT_SIZE);
+    private static final UnifiedStatistics statistics = UnifiedStatistics.getInstance();
+
 
     // === CASTLE POSITIONS ===
     public static final int RED_CASTLE_INDEX = GameState.getIndex(6, 3); // D7

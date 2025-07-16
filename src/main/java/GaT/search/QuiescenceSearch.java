@@ -2,7 +2,7 @@ package GaT.search;
 
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
+
 import java.util.ArrayList;
 import java.util.List;
 

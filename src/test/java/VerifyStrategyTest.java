@@ -1,6 +1,5 @@
 import GaT.model.GameState;
 import GaT.model.Move;
-import GaT.model.SearchConfig;
 import GaT.engine.TimedMinimax;
 import GaT.search.*;
 import org.junit.Before;
@@ -24,7 +23,7 @@ public class VerifyStrategyTest {
         GameState tacticalState = GameState.fromFen("7/7/3b33/BG1r43/3RG3/7/7 r");
 
         // Reset statistics
-        SearchStatistics stats = SearchStatistics.getInstance();
+        UnifiedStatistics stats = UnifiedStatistics.getInstance();
         stats.reset();
         QuiescenceSearch.resetQuiescenceStats();
 
