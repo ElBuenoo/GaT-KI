@@ -9,9 +9,10 @@ import static org.junit.Assert.*;
  *
  * Key fixes:
  * ✅ Proper test position setup
- * ✅ Correct perspective handling
+ * ✅ Correct perspective handling verification
  * ✅ Valid non-terminal positions
  * ✅ Proper terminal position testing
+ * ✅ Fixed central control bonus test logic
  */
 public class EvaluatorTest {
 
@@ -105,25 +106,34 @@ public class EvaluatorTest {
     public void testCentralControlBonus() {
         System.out.println("🎯 Testing Central Control Bonus...");
 
-        // Create position with edge tower
+        // FIXED: Create more clearly differentiated positions
+        // Edge tower position
         GameState edgeState = createEmptyState();
         edgeState.redGuard = GameState.bit(GameState.getIndex(3, 3)); // D4
         edgeState.blueGuard = GameState.bit(GameState.getIndex(3, 4)); // E4
-        edgeState.redTowers = GameState.bit(GameState.getIndex(2, 0)); // A3 (edge)
-        edgeState.redStackHeights[GameState.getIndex(2, 0)] = 1;
+        edgeState.redTowers = GameState.bit(GameState.getIndex(3, 0)); // A4 (far edge)
+        edgeState.redStackHeights[GameState.getIndex(3, 0)] = 1;
 
-        // Create position with center tower
+        // Center tower position (D-file)
         GameState centerState = createEmptyState();
         centerState.redGuard = GameState.bit(GameState.getIndex(3, 3)); // D4
         centerState.blueGuard = GameState.bit(GameState.getIndex(3, 4)); // E4
-        centerState.redTowers = GameState.bit(GameState.getIndex(2, 3)); // D3 (center)
-        centerState.redStackHeights[GameState.getIndex(2, 3)] = 1;
+        centerState.redTowers = GameState.bit(GameState.getIndex(3, 3)); // D4 (center, same rank)
+        centerState.redStackHeights[GameState.getIndex(3, 3)] = 1;
+
+        // Move red guard to avoid overlap
+        centerState.redGuard = GameState.bit(GameState.getIndex(4, 3)); // D5
 
         int edgeScore = evaluator.evaluate(edgeState);
         int centerScore = evaluator.evaluate(centerState);
 
-        System.out.println("Edge piece score: " + edgeScore);
-        System.out.println("Center piece score: " + centerScore);
+        System.out.println("Edge piece (A4) score: " + edgeScore);
+        System.out.println("Center piece (D4) score: " + centerScore);
+
+        // Print detailed breakdown
+        System.out.println("\nDetailed breakdown:");
+        System.out.println("Edge state breakdown:\n" + evaluator.getEvaluationBreakdown(edgeState));
+        System.out.println("Center state breakdown:\n" + evaluator.getEvaluationBreakdown(centerState));
 
         assertTrue("Central pieces should be more valuable", centerScore > edgeScore);
         System.out.println("✅ Central Control Bonus: PASSED");
@@ -152,7 +162,7 @@ public class EvaluatorTest {
     public void testCastleOccupationTerminal() {
         System.out.println("🏰 Testing Castle Occupation Terminal...");
 
-        // Create position where red guard reaches blue castle (D7)
+        // Create position where red guard reaches blue castle (D1)
         GameState castleState = createEmptyState();
         castleState.redGuard = GameState.bit(3); // Red guard at D1 (red's target)
         castleState.blueGuard = GameState.bit(GameState.getIndex(0, 0)); // Blue guard elsewhere
@@ -191,7 +201,6 @@ public class EvaluatorTest {
 
         // Quick eval should be different (simpler) but reasonable
         assertTrue("Quick evaluation should be reasonable", Math.abs(quickEval) < 5000);
-        // For starting position, they might be similar, but not identical in general
         System.out.println("✅ Quick Evaluation Performance: PASSED");
     }
 
@@ -215,6 +224,63 @@ public class EvaluatorTest {
         assertTrue("Guard should be detected as threatened", threatened);
         assertFalse("Guard should be safe in start position", safeInStart);
         System.out.println("✅ Guard Threat Detection: PASSED");
+    }
+
+    @Test
+    public void testSimplePerspectiveHandling() {
+        System.out.println("🔄 Testing Simple Perspective Handling...");
+
+        // Create a very obvious advantage position
+        GameState state = new GameState();
+
+        // Give Red extra material - add a big tower
+        int extraTowerPos = GameState.getIndex(3, 3); // D4
+        state.redTowers |= GameState.bit(extraTowerPos);
+        state.redStackHeights[extraTowerPos] = 5; // Huge tower
+
+        // Test both perspectives
+        state.redToMove = true;
+        int redScore = evaluator.evaluate(state);
+
+        state.redToMove = false;
+        int blueScore = evaluator.evaluate(state);
+
+        System.out.println("Material advantage - Red to move: " + redScore);
+        System.out.println("Material advantage - Blue to move: " + blueScore);
+
+        // With extra material, Red should have positive score when it's Red's turn
+        assertTrue("Red should have positive score with material advantage", redScore > 0);
+        assertTrue("Blue should have negative score when Red has advantage", blueScore < 0);
+        assertEquals("Scores should be exact opposites", redScore, -blueScore);
+
+        System.out.println("✅ Simple Perspective Handling: PASSED");
+    }
+
+    @Test
+    public void testDFileImportance() {
+        System.out.println("📍 Testing D-File Importance...");
+
+        // Tower on D-file vs tower on edge file
+        GameState dFileState = createEmptyState();
+        dFileState.redGuard = GameState.bit(GameState.getIndex(3, 3)); // D4
+        dFileState.blueGuard = GameState.bit(GameState.getIndex(3, 4)); // E4
+        dFileState.redTowers = GameState.bit(GameState.getIndex(2, 3)); // D3 (D-file)
+        dFileState.redStackHeights[GameState.getIndex(2, 3)] = 1;
+
+        GameState edgeFileState = createEmptyState();
+        edgeFileState.redGuard = GameState.bit(GameState.getIndex(3, 3)); // D4
+        edgeFileState.blueGuard = GameState.bit(GameState.getIndex(3, 4)); // E4
+        edgeFileState.redTowers = GameState.bit(GameState.getIndex(2, 6)); // G3 (edge file)
+        edgeFileState.redStackHeights[GameState.getIndex(2, 6)] = 1;
+
+        int dFileScore = evaluator.evaluate(dFileState);
+        int edgeFileScore = evaluator.evaluate(edgeFileState);
+
+        System.out.println("D-file tower score: " + dFileScore);
+        System.out.println("Edge file tower score: " + edgeFileScore);
+
+        assertTrue("D-file should be more valuable than edge", dFileScore > edgeFileScore);
+        System.out.println("✅ D-File Importance: PASSED");
     }
 
     // === HELPER METHODS ===
@@ -266,5 +332,25 @@ public class EvaluatorTest {
 
         assertTrue("Guard advancement should generally improve score", nearScore > farScore);
         System.out.println("✅ Evaluation Gradients: PASSED");
+    }
+
+    @Test
+    public void testEvaluationConsistency() {
+        System.out.println("🔍 Testing Evaluation Consistency...");
+
+        // Test that evaluation is consistent
+        int score1 = evaluator.evaluate(startPosition);
+        int score2 = evaluator.evaluate(startPosition);
+
+        assertEquals("Evaluation should be consistent", score1, score2);
+
+        // Test that copying and evaluating gives same result
+        GameState copy = startPosition.copy();
+        int copyScore = evaluator.evaluate(copy);
+
+        assertEquals("Copy should evaluate the same", score1, copyScore);
+
+        System.out.println("Evaluation consistency: " + score1 + " = " + score2 + " = " + copyScore);
+        System.out.println("✅ Evaluation Consistency: PASSED");
     }
 }
